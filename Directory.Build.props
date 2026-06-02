@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    Versioning is driven by git tags via MinVer. The latest reachable tag of the form vMAJOR.MINOR.PATCH
+    becomes the build version; it is stamped into AssemblyVersion / FileVersion / AssemblyInformationalVersion.
+    Untagged commits get an auto pre-release suffix (e.g. 0.2.0-alpha.0.3). Cut a release by tagging main:
+    `git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0`. No source edits per release. The registry
+    ships as a container image rather than a binary, but the version flows the same way.
+  -->
+  <PropertyGroup>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <!-- Before the first v0.1.0 tag exists, floor untagged (edge) builds at 0.1.0-alpha.0.N instead
+         of 0.0.0-alpha, so the edge channel matches the upcoming first stable release. -->
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

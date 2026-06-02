@@ -1,0 +1,57 @@
+name: release-please
+
+# Release automation. On every push to main, release-please maintains a "Release PR" that bumps the
+# version (from Conventional Commits) and updates the changelog. Merging that Release PR creates the
+# vX.Y.Z tag and a GitHub Release; the publish-image job then builds the container and pushes it to
+# GHCR as :X.Y.Z and :latest. MinVer reads the tag and stamps the version into the image's app.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      # Manifest-driven config (release-please-config.json + .release-please-manifest.json). Uses the
+      # default GITHUB_TOKEN; the publish job runs in this same workflow run (gated on release_created),
+      # so the "GITHUB_TOKEN does not trigger downstream workflows" limitation does not apply.
+      - uses: googleapis/release-please-action@v4
+        id: rp
+
+  publish-image:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0          # MinVer needs full history + the tag release-please just created.
+
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      # `dotnet publish /t:PublishContainer` builds an OCI image (no Dockerfile) and pushes it. The
+      # quoted ContainerImageTags value is one property containing a semicolon-separated tag list.
+      - name: Publish container image
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          dotnet publish src/Protostar.Registry.Api/Protostar.Registry.Api.csproj \
+            -c Release --os linux --arch x64 -t:PublishContainer \
+            -p:ContainerRegistry=ghcr.io \
+            -p:ContainerRepository="${{ github.repository_owner }}/protostar-registry" \
+            -p:ContainerImageTags="\"${VERSION};latest\""

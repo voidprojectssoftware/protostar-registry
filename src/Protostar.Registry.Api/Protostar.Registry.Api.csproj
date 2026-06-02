@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Protostar.Registry.Api</RootNamespace>
+    <UserSecretsId>7d2e9b14-3c5a-4f81-9a26-1b8e6c4d0f55</UserSecretsId>
+    <!-- `dotnet publish /t:PublishContainer` builds the image; the workflow sets registry + tags. -->
+    <ContainerRepository>protostar-registry</ContainerRepository>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.3.5" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.8">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="OpenIddict.AspNetCore" Version="7.5.0" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="7.5.0" />
+    <PackageReference Include="AspNet.Security.OAuth.GitHub" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Protostar.Registry.ServiceDefaults\Protostar.Registry.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

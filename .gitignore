@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+publish/
+artifacts/
+
+# Native build intermediates
+*.ilk
+*.pdb
+*.obj
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# Env / secrets
+.env
+*.env.local
+appsettings.*.local.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+# Normalize line endings. Git stores LF; checkout is native unless pinned below.
+* text=auto
+
+# Shell scripts run on Linux/macOS — they must be LF, even when checked out on Windows.
+*.sh text eol=lf
+
+# Windows scripts are conventionally CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
