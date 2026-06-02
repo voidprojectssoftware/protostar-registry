@@ -41,6 +41,19 @@ public sealed class AuthSurfaceTests(RegistryApiFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Login_chooser_lists_the_identity_providers()
+    {
+        var client = CreateClient();
+
+        var response = await client.GetAsync("/login");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Choose how to sign in", html);
+        Assert.Contains("GitHub", html);
+    }
+
+    [Fact]
     public async Task Discovery_document_exposes_the_oauth_endpoints()
     {
         var client = CreateClient();

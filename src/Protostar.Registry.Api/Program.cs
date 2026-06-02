@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Protostar.Registry.Api;
 using Protostar.Registry.Api.Auth;
 using Protostar.Registry.Api.Data;
+using Scalar.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -101,6 +102,9 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
+// OpenAPI document (served at /openapi/v1.json) + an interactive Scalar reference UI in dev.
+builder.Services.AddOpenApi();
+
 // Seed the public CLI client outside the test host (which has no live database).
 if (!builder.Environment.IsEnvironment("Testing"))
     builder.Services.AddHostedService<OpenIddictClientSeeder>();
@@ -115,11 +119,18 @@ app.UseAuthorization();
 // Apply migrations on startup in Development. Production migrates via a deploy step, not here.
 if (app.Environment.IsDevelopment())
 {
-    using var scope = app.Services.CreateScope();
-    await scope.ServiceProvider.GetRequiredService<RegistryDbContext>().Database.MigrateAsync();
+    using (var scope = app.Services.CreateScope())
+    {
+        await scope.ServiceProvider.GetRequiredService<RegistryDbContext>().Database.MigrateAsync();
+    }
+
+    // API docs: the raw OpenAPI document and an interactive Scalar reference (Swagger-UI successor).
+    app.MapOpenApi();
+    app.MapScalarApiReference(options => options.WithTitle("protostar registry API"));
 }
 
 app.MapAuthEndpoints();
+app.MapLoginEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
 app.MapGet("/v1/meta", () => Results.Ok(new
