@@ -84,8 +84,9 @@ protostar auth logout
 ```
 
 `auth login` opens your browser to the registry's sign-in chooser, you pick GitHub (or `--provider`
-skips the chooser), the registry federates to GitHub, and the resulting tokens are stored in your OS
-credential store. Point at a different registry with `--registry <url>` or `PROTOSTAR_REGISTRY_URL`.
+skips the chooser), the registry federates to GitHub, and the resulting tokens are stored in
+`~/.protostar/credentials.json` (owner-only permissions; override with `PROTOSTAR_CONFIG_DIR`).
+Point at a different registry with `--registry <url>` or `PROTOSTAR_REGISTRY_URL`.
 The CLI checks API compatibility (`/v1/meta`) on connect and refuses an unsupported major.
 
 ## Tests
