@@ -13,6 +13,14 @@ var registrydb = postgres.AddDatabase("registrydb");
 builder.AddProject<Projects.Protostar_Registry_Api>("api")
     .WithReference(registrydb)
     .WaitFor(registrydb)
+    // Pin the API to a stable HTTPS port in dev so `--registry` and the GitHub OAuth callback
+    // (https://localhost:7443/signin-github) stay the same across runs. Non-proxied = the API binds
+    // 7443 directly with the ASP.NET Core dev cert.
+    .WithEndpoint("https", endpoint =>
+    {
+        endpoint.Port = 7443;
+        endpoint.IsProxied = false;
+    })
     .WithEnvironment("GitHub__ClientId", gitHubClientId)
     .WithEnvironment("GitHub__ClientSecret", gitHubClientSecret)
     .WithUrls(context =>
