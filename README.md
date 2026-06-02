@@ -52,6 +52,9 @@ group); the registry supports the current and previous major during a transition
 
 ## Local development
 
+For the full setup — the GitHub OAuth app, running under Aspire, and signing in with the CLI — see
+**[docs/getting-started.md](docs/getting-started.md)**. The short version:
+
 Requires the .NET 10 SDK and a container runtime (Docker/Podman) for Postgres.
 
 The API is served over HTTPS (OpenIddict rejects plain HTTP), so trust the ASP.NET Core dev
