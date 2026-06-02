@@ -34,17 +34,22 @@ public static class AuthEndpoints
     {
         var request = GetServerRequest(context);
 
-        // The login step is delegated to GitHub; the result is carried by the cookie. If the user
-        // isn't signed in yet, bounce them through GitHub and come back to this same authorize URL.
+        // The login step is delegated to an external provider and carried back by the cookie. If the
+        // user isn't signed in yet, either auto-forward to a provider they explicitly named (the
+        // identity_provider hint) or send them to the registry's sign-in chooser to pick one.
         var login = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         if (!login.Succeeded || login.Principal?.Identity?.IsAuthenticated != true)
         {
-            return Results.Challenge(
-                new AuthenticationProperties
-                {
-                    RedirectUri = context.Request.PathBase + context.Request.Path + context.Request.QueryString,
-                },
-                [GitHubScheme]);
+            var returnUrl = context.Request.PathBase + context.Request.Path + context.Request.QueryString;
+
+            if (AuthProviders.ByHint(context.Request.Query["identity_provider"].ToString()) is { } hinted)
+            {
+                return Results.Challenge(
+                    new AuthenticationProperties { RedirectUri = returnUrl },
+                    [hinted.Scheme]);
+            }
+
+            return Results.Redirect($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}");
         }
 
         var user = await FindOrCreateUserAsync(db, login.Principal);

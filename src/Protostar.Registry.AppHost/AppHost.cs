@@ -7,7 +7,7 @@ var gitHubClientId = builder.AddParameter("GitHubClientId");
 var gitHubClientSecret = builder.AddParameter("GitHubClientSecret", secret: true);
 
 // Postgres with a persistent data volume so users survive container restarts in dev.
-var postgres = builder.AddPostgres("postgres").WithDataVolume();
+var postgres = builder.AddPostgres("postgres").WithDataVolume().WithImageTag("18");
 var registrydb = postgres.AddDatabase("registrydb");
 
 builder.AddProject<Projects.Protostar_Registry_Api>("api")

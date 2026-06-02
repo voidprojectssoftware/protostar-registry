@@ -130,6 +130,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapAuthEndpoints();
+app.MapLoginEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
 app.MapGet("/v1/meta", () => Results.Ok(new
