@@ -1,0 +1,18 @@
+Screenshot slots for the Protostar Registry docs
+=================================================
+
+Drop real screenshots into this folder, then replace the matching ":::info
+Screenshot slot" admonition in the doc with the image markdown noted there.
+
+Expected images (filename -> what it shows -> referenced from):
+
+  aspire-dashboard.png
+    The .NET Aspire dashboard on first run: the `postgres` and `api` resources
+    and the named API links (Scalar, OpenAPI, meta, health).
+    getting-started.md
+
+Conventions:
+  - Reference images with a relative path from the doc, e.g. from getting-started.md
+    use: ![alt text](./img/aspire-dashboard.png)
+  - Assets live here under docs/ so they are lifted into the unified docs site
+    along with the Markdown.

@@ -1,12 +1,17 @@
+---
+sidebar_position: 3
+title: Getting started (development)
+---
+
 # Getting started (development)
 
 How to run the protostar registry locally and sign in to it with the CLI. This covers the full
 development loop: prerequisites, the one-time GitHub OAuth setup, running the stack under .NET
 Aspire, and authenticating end to end.
 
-The registry is the service users sync their skills to; the [`protostar` CLI](https://github.com/voidprojectssoftware/protostar-cli)
-is a separate, disconnected client. You can run the registry on its own, but to exercise sign-in you
-will use both.
+The registry is the service users will sync their skills to; the [`protostar` CLI](/cli) is a separate,
+disconnected client. (Sync is not built yet — today the working end-to-end path is **authentication**.)
+You can run the registry on its own, but to exercise sign-in you will use both.
 
 ## Prerequisites
 
@@ -45,6 +50,15 @@ Without these, the stack still boots (the AppHost defaults the values to `placeh
 GitHub leg of sign-in will fail. Use a **separate** OAuth app per environment — make another one with
 the production callback when you deploy, rather than reusing this dev app.
 
+:::tip Not an owner of the `voidprojectssoftware` org?
+Creating the app in the org is preferred so the whole team can manage it, but it
+is not required to get sign-in working locally. If you cannot create an org app,
+make the OAuth app under **your own GitHub account** (the
+[new-OAuth-App page](https://github.com/settings/applications/new)) with the exact
+same callback `https://localhost:7443/signin-github`. It works identically for
+local development.
+:::
+
 ## Run the registry
 
 ```bash
@@ -64,6 +78,12 @@ dashboard you will see two resources, `postgres` and `api`. The API:
 > The dashboard runs on its own port (e.g. `https://localhost:17254`). That is **not** the API — point
 > clients at the `api` resource URL (`https://localhost:7443`), not the dashboard.
 
+:::info 📷 Screenshot slot — `img/aspire-dashboard.png`
+The Aspire dashboard on first run, showing the `postgres` and `api` resources and
+the named API links. Drop the image into `docs/img/` and replace this admonition
+with: `![Aspire dashboard](./img/aspire-dashboard.png)`
+:::
+
 Quick check:
 
 ```bash
@@ -73,8 +93,7 @@ curl -k https://localhost:7443/v1/meta
 
 ## Sign in with the CLI
 
-Build the CLI from the [`protostar-cli`](https://github.com/voidprojectssoftware/protostar-cli) repo,
-then:
+Build the CLI from source (see [CLI → Build from source](/cli/develop/build-from-source)), then:
 
 ```bash
 protostar auth login                 # defaults to https://localhost:7443
@@ -102,7 +121,16 @@ live in the CLI repo's Reqnroll suite.
 ## Database and migrations
 
 The schema is EF Core (`RegistryDbContext`) plus OpenIddict's tables. Migrations apply automatically
-on startup **in Development only**; production applies them as a deploy step.
+on startup **in Development only**. In production they are **not** auto-applied — they are run as an
+explicit deploy step (typically `dotnet ef database update`, or a generated migration bundle, run by
+your deploy pipeline before the new image serves traffic). Keeping production manual avoids a racing
+container applying a migration mid-rollout.
+
+Migration commands use the EF Core CLI tool. Install it once if you do not have it:
+
+```bash
+dotnet tool install --global dotnet-ef
+```
 
 To add a migration after changing the model:
 
@@ -117,7 +145,7 @@ tooling can build the model without a running database.
 
 The registry ships as a container image to GHCR, not a binary. release-please drives stable
 `:X.Y.Z` + `:latest` images; the edge workflow pushes a rolling `:edge` on every push to `main`. See
-the [README](../README.md#releasing) for the version/release model.
+[How the registry works → Releasing](./concepts.md#releasing) for the version/release model.
 
 ## Troubleshooting
 
