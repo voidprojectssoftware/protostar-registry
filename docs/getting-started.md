@@ -3,6 +3,13 @@ sidebar_position: 3
 title: Getting started (development)
 ---
 
+:::warning AI-generated and not yet reviewed
+This page was drafted by AI and has not been reviewed by a human. Protostar is in
+early development with limited maintainer bandwidth, so content may be incomplete
+or inaccurate. Treat it as a starting point, verify anything important against the
+source, and please report any problems you hit.
+:::
+
 # Getting started (development)
 
 How to run the protostar registry locally and sign in to it with the CLI. This covers the full
