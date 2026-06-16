@@ -3,10 +3,13 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.EntityFrameworkCore;
+using OpenIddict.Abstractions;
+using OpenIddict.Validation.AspNetCore;
 using Protostar.Registry.Api;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Skills;
 using Scalar.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -101,7 +104,19 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddAuthorization();
+// Skill-push endpoints authenticate with a registry access token + "registry" scope, not the default
+// cookie/GitHub login.
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(SkillEndpoints.Policy, policy =>
+    {
+        policy.AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx => ctx.User.HasScope("registry"));
+    });
+});
+
+builder.Services.AddScoped<SkillPushService>();
 
 // Domain events: a dispatcher plus an open-generic logging handler as the placeholder consumer. Real
 // handlers (evaluators, the refinement loop) register their own IDomainEventHandler<T> later.
@@ -137,6 +152,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapAuthEndpoints();
 app.MapLoginEndpoints();
+app.MapSkillEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
 app.MapGet("/v1/meta", () => Results.Ok(new
