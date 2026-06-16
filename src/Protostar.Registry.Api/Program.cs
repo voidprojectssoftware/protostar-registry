@@ -177,12 +177,11 @@ app.MapLoginEndpoints();
 app.MapSkillEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
-app.MapGet("/v1/meta", () => Results.Ok(new
-{
-    service = "protostar-registry",
-    version = ApiInfo.Version,
-    apiMajors = ApiInfo.ApiMajors,
-}));
+app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors))
+    .WithName("GetMeta")
+    .WithTags("Meta")
+    .WithSummary("Registry identity and API-compatibility surface")
+    .Produces<ApiMeta>();
 
 app.Run();
 

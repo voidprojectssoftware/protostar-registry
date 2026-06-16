@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Http.Features;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -10,23 +11,60 @@ namespace Protostar.Registry.Api.Skills;
 /// root). The creator is the authenticated caller; the body never names it. The endpoints stay thin and
 /// hand the work to <see cref="SkillPushService"/>.
 /// </summary>
+/// <remarks>
+/// The handlers bind the upload as parameters (<see cref="IFormFileCollection"/> plus a <c>name</c> field)
+/// rather than reading the request directly, so the framework describes the multipart body in the OpenAPI
+/// document. Antiforgery is disabled because callers authenticate with a bearer token, not a browser form.
+/// </remarks>
 public static class SkillEndpoints
 {
     /// <summary>The authorization policy these endpoints require: a valid registry access token.</summary>
     public const string Policy = "registry-api";
 
-    // Request-body ceilings, enforced before the body is buffered: a coarse guard in front of the
-    // per-skill SkillSizePolicy. The single endpoint holds one skill plus multipart framing; the bulk
-    // endpoint holds several (each still bounded per-skill after grouping) and is kept under the default
-    // multipart length limit (~128 MB) so the body-size limit is the binding constraint.
+    // Coarse request-body ceilings, set as endpoint metadata so Kestrel rejects an over-limit body before
+    // buffering: a guard in front of the per-skill SkillSizePolicy. The single upload holds one skill plus
+    // multipart framing; the bulk upload holds several and is raised above Kestrel's 30 MB default. Both
+    // stay under the ~128 MB multipart length limit, so this body-size limit is the binding constraint.
     private const long SingleUploadMaxBytes = SkillSizePolicy.MaxVersionBytes + (1L * 1024 * 1024);
     private const long BulkUploadMaxBytes = 100L * 1024 * 1024;
 
     public static void MapSkillEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/v1/skills").RequireAuthorization(Policy);
-        group.MapPost("", PushOneAsync);
-        group.MapPost("/bulk", PushManyAsync);
+        var group = app.MapGroup("/v1/skills")
+            .RequireAuthorization(Policy)
+            .DisableAntiforgery()
+            .WithTags("Skills");
+
+        group.MapPost("", PushOneAsync)
+            .WithName("PushSkill")
+            .WithSummary("Push one skill")
+            .WithDescription(
+                "Uploads one skill as multipart/form-data: one file part per file, where each part's " +
+                "filename is the path relative to the skill root (so SKILL.md sits at the root). An optional " +
+                "`name` field names the skill when its SKILL.md omits one. The creator is the authenticated " +
+                "caller. Returns 201 when a new version is stored, or 200 when the push matches the current " +
+                "version byte-for-byte.")
+            .WithMetadata(new RequestSizeLimitAttribute(SingleUploadMaxBytes))
+            .Produces<SkillPushResponse>(StatusCodes.Status201Created)
+            .Produces<SkillPushResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge);
+
+        group.MapPost("/bulk", PushManyAsync)
+            .WithName("PushSkills")
+            .WithSummary("Push many skills")
+            .WithDescription(
+                "Uploads several skills at once as multipart/form-data. Each file part's filename is prefixed " +
+                "with its skill's directory segment (`<skill>/<relative path>`); files are grouped by that " +
+                "first segment, which also names the skill when its SKILL.md omits one. Returns one result " +
+                "per skill; one bad skill does not fail the others.")
+            .WithMetadata(new RequestSizeLimitAttribute(BulkUploadMaxBytes))
+            .Produces<SkillBulkPushResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge);
     }
 
     /// <summary>
@@ -34,24 +72,20 @@ public static class SkillEndpoints
     /// root); an optional <c>name</c> form field names the skill when its SKILL.md omits a name.
     /// </summary>
     private static async Task<IResult> PushOneAsync(
-        HttpContext context, SkillPushService pushService, CancellationToken cancellationToken)
+        IFormFileCollection files,
+        [FromForm] string? name,
+        ClaimsPrincipal user,
+        SkillPushService pushService,
+        CancellationToken cancellationToken)
     {
-        if (!TryGetCreator(context, out var creatorId))
+        if (!TryGetCreator(user, out var creatorId))
             return Results.Unauthorized();
 
-        if (!context.Request.HasFormContentType)
-            return MultipartExpected();
-
-        var (form, error) = await TryReadFormAsync(context, SingleUploadMaxBytes, cancellationToken);
-        if (error is not null)
-            return error;
-
-        var uploads = await ReadUploadsAsync(form!.Files, cancellationToken);
+        var uploads = await ReadUploadsAsync(files, cancellationToken);
         if (uploads.Count == 0)
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The upload contained no files.");
 
-        var fallbackName = Blank(form["name"].ToString());
-        var result = await pushService.PushAsync(creatorId, fallbackName, uploads, cancellationToken);
+        var result = await pushService.PushAsync(creatorId, Blank(name), uploads, cancellationToken);
 
         return result.Status switch
         {
@@ -68,27 +102,23 @@ public static class SkillEndpoints
     /// fail the others.
     /// </summary>
     private static async Task<IResult> PushManyAsync(
-        HttpContext context, SkillPushService pushService, CancellationToken cancellationToken)
+        IFormFileCollection files,
+        ClaimsPrincipal user,
+        SkillPushService pushService,
+        CancellationToken cancellationToken)
     {
-        if (!TryGetCreator(context, out var creatorId))
+        if (!TryGetCreator(user, out var creatorId))
             return Results.Unauthorized();
 
-        if (!context.Request.HasFormContentType)
-            return MultipartExpected();
-
-        var (form, error) = await TryReadFormAsync(context, BulkUploadMaxBytes, cancellationToken);
-        if (error is not null)
-            return error;
-
-        var uploads = await ReadUploadsAsync(form!.Files, cancellationToken);
+        var uploads = await ReadUploadsAsync(files, cancellationToken);
         if (uploads.Count == 0)
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The upload contained no files.");
 
         var skills = GroupBySkillDirectory(uploads);
 
         var results = new List<SkillPushResult>(skills.Count);
-        foreach (var (skillDirectory, files) in skills)
-            results.Add(await pushService.PushAsync(creatorId, skillDirectory, files, cancellationToken));
+        foreach (var (skillDirectory, skillFiles) in skills)
+            results.Add(await pushService.PushAsync(creatorId, skillDirectory, skillFiles, cancellationToken));
 
         return Results.Ok(new SkillBulkPushResponse(results.Select(ToResponse).ToArray()));
     }
@@ -115,28 +145,8 @@ public static class SkillEndpoints
         return skills;
     }
 
-    // Caps the request body (before it is read) and reads the multipart form, translating an over-limit
-    // body into a clean 413 instead of letting Kestrel's BadHttpRequestException surface as a raw error.
-    private static async Task<(IFormCollection? Form, IResult? Error)> TryReadFormAsync(
-        HttpContext context, long maxBytes, CancellationToken cancellationToken)
-    {
-        if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodySize)
-            bodySize.MaxRequestBodySize = maxBytes;
-
-        try
-        {
-            return (await context.Request.ReadFormAsync(cancellationToken), null);
-        }
-        catch (BadHttpRequestException exception) when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)
-        {
-            return (null, Results.Problem(
-                statusCode: StatusCodes.Status413PayloadTooLarge,
-                title: $"The upload exceeds the maximum request size of {maxBytes} bytes."));
-        }
-    }
-
-    private static bool TryGetCreator(HttpContext context, out Guid creatorId) =>
-        Guid.TryParse(context.User.GetClaim(Claims.Subject), out creatorId);
+    private static bool TryGetCreator(ClaimsPrincipal user, out Guid creatorId) =>
+        Guid.TryParse(user.GetClaim(Claims.Subject), out creatorId);
 
     private static async Task<List<SkillFileUpload>> ReadUploadsAsync(
         IFormFileCollection files, CancellationToken cancellationToken)
@@ -169,9 +179,6 @@ public static class SkillEndpoints
 
         return Results.Problem(statusCode: status, title: result.Message);
     }
-
-    private static IResult MultipartExpected() =>
-        Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Expected a multipart/form-data upload.");
 
     private static SkillPushResponse ToResponse(SkillPushResult result) => new(
         Status: result.Status.ToString().ToLowerInvariant(),
