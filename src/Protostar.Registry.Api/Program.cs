@@ -123,12 +123,21 @@ builder.Services.AddScoped<SkillPushService>();
 builder.Services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
 builder.Services.AddScoped(typeof(IDomainEventHandler<>), typeof(LoggingDomainEventHandler<>));
 
-// OpenAPI document (served at /openapi/v1.json) + an interactive Scalar reference UI in dev.
-builder.Services.AddOpenApi();
+// OpenAPI document (served at /openapi/v1.json) + an interactive Scalar reference UI in dev. In
+// Development, advertise the OAuth2 flow so the Scalar UI can sign in and call protected endpoints.
+builder.Services.AddOpenApi(options =>
+{
+    if (builder.Environment.IsDevelopment())
+        options.AddDocumentTransformer<OAuthSecuritySchemeTransformer>();
+});
 
 // Seed the public CLI client outside the test host (which has no live database).
 if (!builder.Environment.IsEnvironment("Testing"))
     builder.Services.AddHostedService<OpenIddictClientSeeder>();
+
+// Seed the browser client the Scalar UI logs in with. Development only; never seed it in production.
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddHostedService<ScalarUiClientSeeder>();
 
 var app = builder.Build();
 
@@ -146,8 +155,21 @@ if (app.Environment.IsDevelopment())
     }
 
     // API docs: the raw OpenAPI document and an interactive Scalar reference (Swagger-UI successor).
+    // The OAuth flow lets you sign in from the UI and call the protected skill endpoints with a token.
     app.MapOpenApi();
-    app.MapScalarApiReference(options => options.WithTitle("protostar registry API"));
+    app.MapScalarApiReference(options =>
+    {
+        options.WithTitle("protostar registry API")
+            .AddPreferredSecuritySchemes(OAuthSecuritySchemeTransformer.SchemeId)
+            .AddAuthorizationCodeFlow(OAuthSecuritySchemeTransformer.SchemeId, flow =>
+            {
+                flow.ClientId = ScalarUiClientSeeder.ClientId;
+                flow.Pkce = Pkce.Sha256;
+                flow.SelectedScopes = ["openid", "profile", "email", "registry"];
+                // Pin the redirect to the reference page; some Scalar versions otherwise send the origin.
+                flow.RedirectUri = "https://localhost:7443/scalar/v1";
+            });
+    });
 }
 
 app.MapAuthEndpoints();
