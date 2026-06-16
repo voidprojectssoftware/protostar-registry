@@ -5,15 +5,15 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
-using Protostar.Registry.Api.Data;
+using Protostar.Registry.Api.Infrastructure;
 
 #nullable disable
 
 namespace Protostar.Registry.Api.Migrations
 {
     [DbContext(typeof(RegistryDbContext))]
-    [Migration("20260602044813_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260616033913_AddSkills")]
+    partial class AddSkills
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -233,7 +233,7 @@ namespace Protostar.Registry.Api.Migrations
                     b.ToTable("OpenIddictTokens", (string)null);
                 });
 
-            modelBuilder.Entity("Protostar.Registry.Api.Data.User", b =>
+            modelBuilder.Entity("Protostar.Registry.Api.Identity.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -264,6 +264,114 @@ namespace Protostar.Registry.Api.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.Skill", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CurrentVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CurrentVersionId");
+
+                    b.HasIndex("CreatorId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("Skills");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SkillVersionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SkillVersionId", "RelativePath")
+                        .IsUnique();
+
+                    b.ToTable("SkillFiles");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AllowedToolsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Compatibility")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("License")
+                        .HasColumnType("text");
+
+                    b.Property<string>("MetadataJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("PushedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PushedById");
+
+                    b.HasIndex("SkillId", "VersionNumber")
+                        .IsUnique();
+
+                    b.ToTable("SkillVersions");
+                });
+
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
                 {
                     b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", "Application")
@@ -288,6 +396,50 @@ namespace Protostar.Registry.Api.Migrations
                     b.Navigation("Authorization");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.Skill", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Identity.User", "Creator")
+                        .WithMany()
+                        .HasForeignKey("CreatorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Skills.SkillVersion", "CurrentVersion")
+                        .WithMany()
+                        .HasForeignKey("CurrentVersionId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("Creator");
+
+                    b.Navigation("CurrentVersion");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillFile", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Skills.SkillVersion", null)
+                        .WithMany("Files")
+                        .HasForeignKey("SkillVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillVersion", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Identity.User", "PushedBy")
+                        .WithMany()
+                        .HasForeignKey("PushedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Skills.Skill", null)
+                        .WithMany("Versions")
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PushedBy");
+                });
+
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", b =>
                 {
                     b.Navigation("Authorizations");
@@ -298,6 +450,16 @@ namespace Protostar.Registry.Api.Migrations
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
                 {
                     b.Navigation("Tokens");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.Skill", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillVersion", b =>
+                {
+                    b.Navigation("Files");
                 });
 #pragma warning restore 612, 618
         }
