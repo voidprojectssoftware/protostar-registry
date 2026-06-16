@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.EntityFrameworkCore;
 using Protostar.Registry.Api;
+using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
 using Scalar.AspNetCore;
@@ -101,6 +102,11 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddAuthorization();
+
+// Domain events: a dispatcher plus an open-generic logging handler as the placeholder consumer. Real
+// handlers (evaluators, the refinement loop) register their own IDomainEventHandler<T> later.
+builder.Services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+builder.Services.AddScoped(typeof(IDomainEventHandler<>), typeof(LoggingDomainEventHandler<>));
 
 // OpenAPI document (served at /openapi/v1.json) + an interactive Scalar reference UI in dev.
 builder.Services.AddOpenApi();
