@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.EntityFrameworkCore;
 using Protostar.Registry.Api;
-using Protostar.Registry.Api.Auth;
-using Protostar.Registry.Api.Data;
+using Protostar.Registry.Api.Identity;
+using Protostar.Registry.Api.Infrastructure;
 using Scalar.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 

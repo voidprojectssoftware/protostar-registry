@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 
-namespace Protostar.Registry.Api.Auth;
+namespace Protostar.Registry.Api.Identity;
 
 /// <summary>
 /// The registry's own sign-in chooser. Rather than slamming the user straight into one provider,

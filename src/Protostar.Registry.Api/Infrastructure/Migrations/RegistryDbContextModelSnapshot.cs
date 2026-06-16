@@ -2,21 +2,18 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
-using Protostar.Registry.Api.Data;
+using Protostar.Registry.Api.Infrastructure;
 
 #nullable disable
 
 namespace Protostar.Registry.Api.Migrations
 {
     [DbContext(typeof(RegistryDbContext))]
-    [Migration("20260602044813_InitialCreate")]
-    partial class InitialCreate
+    partial class RegistryDbContextModelSnapshot : ModelSnapshot
     {
-        /// <inheritdoc />
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -233,7 +230,7 @@ namespace Protostar.Registry.Api.Migrations
                     b.ToTable("OpenIddictTokens", (string)null);
                 });
 
-            modelBuilder.Entity("Protostar.Registry.Api.Data.User", b =>
+            modelBuilder.Entity("Protostar.Registry.Api.Identity.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
