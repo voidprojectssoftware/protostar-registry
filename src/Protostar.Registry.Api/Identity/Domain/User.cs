@@ -1,4 +1,4 @@
-namespace Protostar.Registry.Api.Data;
+namespace Protostar.Registry.Api.Identity;
 
 /// <summary>
 /// A registry user, identified by their GitHub account. Synced skills are tagged to this

@@ -1,7 +1,7 @@
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace Protostar.Registry.Api.Auth;
+namespace Protostar.Registry.Api.Identity;
 
 /// <summary>
 /// Seeds the public <c>protostar-cli</c> OAuth client on startup if it is absent. The CLI is a

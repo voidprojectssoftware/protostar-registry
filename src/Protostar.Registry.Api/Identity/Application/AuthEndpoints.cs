@@ -4,10 +4,10 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
-using Protostar.Registry.Api.Data;
+using Protostar.Registry.Api.Infrastructure;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace Protostar.Registry.Api.Auth;
+namespace Protostar.Registry.Api.Identity;
 
 /// <summary>
 /// The OAuth2/OIDC endpoints exposed to the CLI. OpenIddict handles protocol mechanics; these

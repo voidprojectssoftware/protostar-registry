@@ -1,4 +1,4 @@
-namespace Protostar.Registry.Api.Auth;
+namespace Protostar.Registry.Api.Identity;
 
 /// <summary>An external identity provider the registry offers on its sign-in page.</summary>
 /// <param name="Scheme">The ASP.NET Core authentication scheme name.</param>
