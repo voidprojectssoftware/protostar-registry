@@ -23,3 +23,11 @@ internal static class ApiInfo
         return plus >= 0 ? info[..plus] : info;
     }
 }
+
+/// <summary>The registry's identity and API-compatibility surface, returned by <c>/v1/meta</c>.</summary>
+/// <remarks>
+/// <c>ApiMajors</c> lists the API major versions this build serves; the CLI checks it on connect to
+/// decide compatibility. Serialized with the default camelCase policy (<c>service</c>, <c>version</c>,
+/// <c>apiMajors</c>).
+/// </remarks>
+public sealed record ApiMeta(string Service, string Version, int[] ApiMajors);
