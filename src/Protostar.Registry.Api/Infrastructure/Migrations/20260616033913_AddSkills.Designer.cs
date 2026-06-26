@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Protostar.Registry.Api.Infrastructure;
@@ -11,9 +12,11 @@ using Protostar.Registry.Api.Infrastructure;
 namespace Protostar.Registry.Api.Migrations
 {
     [DbContext(typeof(RegistryDbContext))]
-    partial class RegistryDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260616033913_AddSkills")]
+    partial class AddSkills
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

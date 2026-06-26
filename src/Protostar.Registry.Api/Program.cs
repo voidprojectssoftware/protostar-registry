@@ -3,9 +3,13 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.EntityFrameworkCore;
+using OpenIddict.Abstractions;
+using OpenIddict.Validation.AspNetCore;
 using Protostar.Registry.Api;
+using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Skills;
 using Scalar.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -100,14 +104,40 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddAuthorization();
+// Skill-push endpoints authenticate with a registry access token + "registry" scope, not the default
+// cookie/GitHub login.
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(SkillEndpoints.Policy, policy =>
+    {
+        policy.AddAuthenticationSchemes(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx => ctx.User.HasScope("registry"));
+    });
+});
 
-// OpenAPI document (served at /openapi/v1.json) + an interactive Scalar reference UI in dev.
-builder.Services.AddOpenApi();
+builder.Services.AddScoped<SkillPushService>();
+
+// Domain events: a dispatcher plus an open-generic logging handler as the placeholder consumer. Real
+// handlers (evaluators, the refinement loop) register their own IDomainEventHandler<T> later.
+builder.Services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+builder.Services.AddScoped(typeof(IDomainEventHandler<>), typeof(LoggingDomainEventHandler<>));
+
+// OpenAPI document (served at /openapi/v1.json) + an interactive Scalar reference UI in dev. In
+// Development, advertise the OAuth2 flow so the Scalar UI can sign in and call protected endpoints.
+builder.Services.AddOpenApi(options =>
+{
+    if (builder.Environment.IsDevelopment())
+        options.AddDocumentTransformer<OAuthSecuritySchemeTransformer>();
+});
 
 // Seed the public CLI client outside the test host (which has no live database).
 if (!builder.Environment.IsEnvironment("Testing"))
     builder.Services.AddHostedService<OpenIddictClientSeeder>();
+
+// Seed the browser client the Scalar UI logs in with. Development only; never seed it in production.
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddHostedService<ScalarUiClientSeeder>();
 
 var app = builder.Build();
 
@@ -125,20 +155,33 @@ if (app.Environment.IsDevelopment())
     }
 
     // API docs: the raw OpenAPI document and an interactive Scalar reference (Swagger-UI successor).
+    // The OAuth flow lets you sign in from the UI and call the protected skill endpoints with a token.
     app.MapOpenApi();
-    app.MapScalarApiReference(options => options.WithTitle("protostar registry API"));
+    app.MapScalarApiReference(options =>
+    {
+        options.WithTitle("protostar registry API")
+            .AddPreferredSecuritySchemes(OAuthSecuritySchemeTransformer.SchemeId)
+            .AddAuthorizationCodeFlow(OAuthSecuritySchemeTransformer.SchemeId, flow =>
+            {
+                flow.ClientId = ScalarUiClientSeeder.ClientId;
+                flow.Pkce = Pkce.Sha256;
+                flow.SelectedScopes = ["openid", "profile", "email", "registry"];
+                // Pin the redirect to the reference page; some Scalar versions otherwise send the origin.
+                flow.RedirectUri = "https://localhost:7443/scalar/v1";
+            });
+    });
 }
 
 app.MapAuthEndpoints();
 app.MapLoginEndpoints();
+app.MapSkillEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
-app.MapGet("/v1/meta", () => Results.Ok(new
-{
-    service = "protostar-registry",
-    version = ApiInfo.Version,
-    apiMajors = ApiInfo.ApiMajors,
-}));
+app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors))
+    .WithName("GetMeta")
+    .WithTags("Meta")
+    .WithSummary("Registry identity and API-compatibility surface")
+    .Produces<ApiMeta>();
 
 app.Run();
 
