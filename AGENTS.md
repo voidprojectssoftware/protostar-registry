@@ -14,18 +14,20 @@ Aspire.
 - `src/Protostar.Registry.Api/` — the API.
 - `src/Protostar.Registry.AppHost/` — Aspire orchestrator (Postgres + the API).
 - `src/Protostar.Registry.ServiceDefaults/` — shared Aspire OTel / health / resilience defaults.
-- `test/Protostar.Registry.Tests/` — integration tests over `WebApplicationFactory`.
+- `test/Protostar.Registry.Tests/` — unit tests asserting domain behavior in isolation (value objects, policies, aggregate behavior); no host, no database.
 
 ## Build and test
 
 ```bash
 dotnet build protostar-registry.sln                                  # build everything
-dotnet test test/Protostar.Registry.Tests/...                        # integration tests
+dotnet test test/Protostar.Registry.Tests/...                        # unit tests
 ```
 
-The test host runs in the `Testing` environment with no live database; the covered endpoints do not touch
-Postgres. Database-backed scenarios belong in the acceptance layer (tracked separately), or use a real
-Postgres (e.g. Testcontainers) when added.
+These are fast, isolated unit tests: they assert the domain model's behavior directly (value objects,
+policies, aggregate behavior) with no web host, no `WebApplicationFactory`, and no database. They are
+authored contract-first, derived from each type's documented contract rather than its implementation.
+End-to-end, user-focused scenarios (the full push path through HTTP and Postgres) belong in the BDD
+acceptance layer, tracked separately; reach for a real Postgres (e.g. Testcontainers) there, not here.
 
 EF Core migrations:
 

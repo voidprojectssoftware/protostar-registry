@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
-namespace Protostar.Registry.Api.Data;
+namespace Protostar.Registry.Api.Infrastructure;
 
 /// <summary>
 /// Design-time factory so <c>dotnet ef migrations</c> can construct the context without the

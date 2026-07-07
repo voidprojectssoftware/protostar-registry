@@ -1,45 +1,44 @@
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace Protostar.Registry.Api.Auth;
+namespace Protostar.Registry.Api.Identity;
 
 /// <summary>
-/// Seeds the public <c>protostar-cli</c> OAuth client on startup if it is absent. The CLI is a
-/// native, public client (no secret) that authenticates with Authorization Code + PKCE over a
-/// loopback redirect (RFC 8252). OpenIddict special-cases loopback redirect URIs and ignores the
-/// port at validation time, so the CLI may listen on any ephemeral 127.0.0.1 port.
+/// Seeds the browser-based <c>scalar-ui</c> OAuth client the Scalar API reference uses to run the
+/// authorization-code + PKCE login and obtain a token for trying protected endpoints. A public client with
+/// the Scalar page as its redirect URI. Registered only in Development; it must never exist in production.
 /// </summary>
-public sealed class OpenIddictClientSeeder(IServiceProvider services) : IHostedService
+public sealed class ScalarUiClientSeeder(IServiceProvider services) : IHostedService
 {
-    public const string CliClientId = "protostar-cli";
+    public const string ClientId = "scalar-ui";
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         using var scope = services.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
 
-        if (await manager.FindByClientIdAsync(CliClientId, cancellationToken) is not null)
+        if (await manager.FindByClientIdAsync(ClientId, cancellationToken) is not null)
             return;
 
         await manager.CreateAsync(new OpenIddictApplicationDescriptor
         {
-            ClientId = CliClientId,
+            ClientId = ClientId,
             ClientType = ClientTypes.Public,
-            ApplicationType = ApplicationTypes.Native,
+            ApplicationType = ApplicationTypes.Web,
             ConsentType = ConsentTypes.Implicit,
-            DisplayName = "protostar CLI",
+            DisplayName = "Scalar API reference (dev)",
             RedirectUris =
             {
-                new Uri("http://127.0.0.1/callback"),
-                new Uri("http://localhost/callback"),
+                // Scalar's default callback is the reference page; register the base too, since some
+                // Scalar versions send the origin instead of the full page path.
+                new Uri("https://localhost:7443/scalar/v1"),
+                new Uri("https://localhost:7443"),
             },
             Permissions =
             {
                 Permissions.Endpoints.Authorization,
                 Permissions.Endpoints.Token,
-                Permissions.Endpoints.EndSession,
                 Permissions.GrantTypes.AuthorizationCode,
-                Permissions.GrantTypes.RefreshToken,
                 Permissions.ResponseTypes.Code,
                 Permissions.Scopes.Email,
                 Permissions.Scopes.Profile,
