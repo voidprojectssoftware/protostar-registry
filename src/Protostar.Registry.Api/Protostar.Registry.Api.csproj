@@ -8,6 +8,10 @@
     <UserSecretsId>7d2e9b14-3c5a-4f81-9a26-1b8e6c4d0f55</UserSecretsId>
     <!-- `dotnet publish /t:PublishContainer` builds the image; the workflow sets registry + tags. -->
     <ContainerRepository>protostar-registry</ContainerRepository>
+    <!-- XML doc comments feed the OpenAPI document (endpoint and schema descriptions). CS1591 (missing
+         comments) stays off: not every public type is part of the API surface. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

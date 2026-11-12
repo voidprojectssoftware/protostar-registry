@@ -134,10 +134,12 @@ builder.Services.AddScoped(typeof(IDomainEventHandler<>), typeof(LoggingDomainEv
 
 // OpenAPI document (served at /openapi/v1.json) + an interactive Scalar reference UI in dev. In
 // Development, advertise the OAuth2 flow so the Scalar UI can sign in and call protected endpoints.
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddOpenApi(options =>
 {
-    if (builder.Environment.IsDevelopment())
-        options.AddDocumentTransformer<OAuthSecuritySchemeTransformer>();
+    options.AddDocumentTransformer<RegistryDocumentTransformer>();
+    options.AddDocumentTransformer<OAuthSecuritySchemeTransformer>();
+    options.AddOperationTransformer<OAuthSecuritySchemeTransformer>();
 });
 
 // Seed the public CLI client outside the test host (which has no live database).
@@ -188,8 +190,9 @@ app.MapSkillEndpoints();
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
 app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors))
     .WithName("GetMeta")
-    .WithTags("Meta")
+    .WithTags(ApiTags.Meta)
     .WithSummary("Registry identity and API-compatibility surface")
+    .WithDescription("Public. Clients call this first and stop with an upgrade hint when their API major is not listed.")
     .Produces<ApiMeta>();
 
 app.Run();
