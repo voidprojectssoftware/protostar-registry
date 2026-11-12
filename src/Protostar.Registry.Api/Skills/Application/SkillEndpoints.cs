@@ -1,3 +1,4 @@
+using Protostar.Registry.Api.Infrastructure;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Abstractions;
@@ -33,7 +34,7 @@ public static class SkillEndpoints
         var group = app.MapGroup("/v1/skills")
             .RequireAuthorization(Policy)
             .DisableAntiforgery()
-            .WithTags("Skills");
+            .WithTags(ApiTags.Skills);
 
         group.MapPost("", PushOneAsync)
             .WithName("PushSkill")

@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Encodings.Web;
+using System.ComponentModel;
 using Microsoft.AspNetCore.Authentication;
+using Protostar.Registry.Api.Infrastructure;
 
 namespace Protostar.Registry.Api.Identity;
 
@@ -14,22 +16,39 @@ public static class LoginPageEndpoints
 {
     public static void MapLoginEndpoints(this WebApplication app)
     {
-        app.MapGet("/login", (string? returnUrl) =>
-            Results.Content(RenderLoginPage(LocalReturnUrl(returnUrl)), "text/html; charset=utf-8"));
+        var login = app.MapGroup("/login").WithTags(ApiTags.SignIn);
 
-        app.MapGet("/login/challenge", (string provider, string? returnUrl) =>
+        login.MapGet("", (
+            [Description("Where to continue after sign-in. Must be a path on this registry; anything else falls back to `/`.")] string? returnUrl) =>
+            Results.Content(RenderLoginPage(LocalReturnUrl(returnUrl)), "text/html; charset=utf-8"))
+            .WithName("ShowSignInChooser")
+            .WithSummary("Show the sign-in chooser")
+            .WithDescription("An HTML page with one button per identity provider. The authorize endpoint sends a browser " +
+                "here when it has no registry session.")
+            .Produces<string>(StatusCodes.Status200OK, "text/html")
+            .WithResponseDescription(StatusCodes.Status200OK, "The chooser page.");
+
+        login.MapGet("/challenge", (
+            [Description("The provider's hint (for example `github`) or scheme name.")] string provider,
+            [Description("Where to continue after sign-in. Must be a path on this registry; anything else falls back to `/`.")] string? returnUrl) =>
         {
             var target = AuthProviders.ByHint(provider)
                 ?? AuthProviders.All.FirstOrDefault(p =>
                     string.Equals(p.Scheme, provider, StringComparison.OrdinalIgnoreCase));
 
             if (target is null)
-                return Results.BadRequest($"Unknown identity provider '{provider}'.");
+                return Results.Text($"Unknown identity provider '{provider}'.", "text/plain", statusCode: StatusCodes.Status400BadRequest);
 
             return Results.Challenge(
                 new AuthenticationProperties { RedirectUri = LocalReturnUrl(returnUrl) },
                 [target.Scheme]);
-        });
+        })
+            .WithName("ChallengeProvider")
+            .WithSummary("Sign in with one provider")
+            .WithDescription("Sends the browser to the chosen identity provider, then back to `returnUrl`.")
+            .ProducesRedirect("To the identity provider's sign-in page.")
+            .Produces<string>(StatusCodes.Status400BadRequest, "text/plain")
+            .WithResponseDescription(StatusCodes.Status400BadRequest, "No provider has that hint or scheme name.");
     }
 
     /// <summary>

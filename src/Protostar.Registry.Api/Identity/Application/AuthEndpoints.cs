@@ -18,12 +18,116 @@ public static class AuthEndpoints
 {
     public const string GitHubScheme = "GitHub";
 
+    // The authorize request's parameters (RFC 6749 section 4.1.1, RFC 7636, OpenID Connect Core 3.1.2.1), plus
+    // the registry's identity_provider shortcut. Documented once, for both the query and the form variant.
+    private static readonly ProtocolParameter[] AuthorizeParameters =
+    [
+        new("response_type", true, "Must be `code`.", "code"),
+        new("client_id", true, "The registered client, for example `protostar-cli`."),
+        new("redirect_uri", true, "Where to send the browser with the code. Must match a URI registered for the client; " +
+            "loopback clients may use any port (RFC 8252)."),
+        new("scope", false, "Space-separated scopes. Request `openid profile email registry offline_access` to call the API " +
+            "and receive a refresh token."),
+        new("state", false, "An opaque value returned unchanged on the redirect, to tie the response to the request."),
+        new("code_challenge", true, "The PKCE challenge: base64url(SHA-256(code_verifier))."),
+        new("code_challenge_method", true, "Must be `S256`.", "S256"),
+        new("identity_provider", false, "Skip the sign-in chooser and go straight to this provider, for example `github`. " +
+            "Specific to this registry."),
+    ];
+
+    private static readonly ProtocolParameter[] LogoutParameters =
+    [
+        new("id_token_hint", false, "The ID token of the session being ended."),
+        new("post_logout_redirect_uri", false, "Where to send the browser afterwards. Must be registered for the client."),
+        new("state", false, "An opaque value returned unchanged on that redirect."),
+    ];
+
+    private const string AuthorizeDescription =
+        """
+        Starts sign-in in the user's browser. If the browser has no registry session, it is sent to the sign-in
+        chooser (or straight to the provider named by `identity_provider`); after sign-in it comes back here.
+        With a session, the browser is redirected to `redirect_uri` with `code` and `state`, and the client
+        exchanges the code at the token endpoint.
+
+        A request the registry rejects (unknown client, unregistered redirect URI, unsupported scope, missing PKCE)
+        is answered with `400` and a plain-text body of `error`, `error_description` and `error_uri` lines.
+        """;
+
+    private const string AuthorizeError =
+        "The request was rejected. The body is plain text, one `name:value` line each for `error` (for example " +
+        "`invalid_request` or `invalid_scope`), `error_description` and `error_uri`.";
+
     public static void MapAuthEndpoints(this WebApplication app)
     {
-        app.MapMethods("/connect/authorize", ["GET", "POST"], AuthorizeAsync);
-        app.MapPost("/connect/token", ExchangeAsync);
-        app.MapMethods("/connect/userinfo", ["GET", "POST"], UserInfoAsync);
-        app.MapMethods("/connect/logout", ["GET", "POST"], LogoutAsync);
+        var connect = app.MapGroup("/connect").WithTags(ApiTags.OAuth);
+
+        connect.MapGet("/authorize", AuthorizeAsync)
+            .WithName("Authorize")
+            .WithSummary("Start sign-in (authorization code with PKCE)")
+            .WithDescription(AuthorizeDescription)
+            .WithQueryParameters(AuthorizeParameters)
+            .ProducesRedirect("To the sign-in chooser or provider when the browser has no session; otherwise to " +
+                "`redirect_uri` with `code` and `state`.")
+            .Produces<string>(StatusCodes.Status400BadRequest, "text/plain")
+            .WithResponseDescription(StatusCodes.Status400BadRequest, AuthorizeError);
+
+        connect.MapPost("/authorize", AuthorizeAsync)
+            .WithName("AuthorizeWithForm")
+            .WithSummary("Start sign-in, with the parameters in a form body")
+            .WithDescription("The same request as `GET /connect/authorize`, sent as a form post (OpenID Connect Core 3.1.2.1).")
+            .WithFormParameters(AuthorizeParameters)
+            .ProducesRedirect("As for `GET /connect/authorize`.")
+            .Produces<string>(StatusCodes.Status400BadRequest, "text/plain")
+            .WithResponseDescription(StatusCodes.Status400BadRequest, AuthorizeError);
+
+        connect.MapPost("/token", ExchangeAsync)
+            .WithName("GetToken")
+            .WithSummary("Exchange a code, or renew a session")
+            .WithDescription(
+                """
+                With `grant_type=authorization_code`, exchanges the code from the authorize redirect, plus the PKCE
+                `code_verifier`, for tokens. With `grant_type=refresh_token`, renews them from a refresh token.
+                Each refresh returns a new refresh token; keep the latest one.
+                """)
+            .Accepts<TokenRequest>("application/x-www-form-urlencoded")
+            .Produces<TokenResponse>()
+            .WithResponseDescription(StatusCodes.Status200OK, "The tokens.")
+            .Produces<OAuthError>(StatusCodes.Status400BadRequest)
+            .WithResponseDescription(StatusCodes.Status400BadRequest,
+                "The request was rejected: for example `invalid_grant` for a used, expired, or mismatched code or " +
+                "refresh token, or `invalid_request` for a missing parameter.");
+
+        connect.MapGet("/userinfo", UserInfoAsync)
+            .WithName("GetUserInfo")
+            .WithSummary("Get the signed-in user")
+            .WithDescription("Returns the registry user the access token was issued to.")
+            .WithMetadata(new RequiresAccessTokenAttribute("openid"))
+            .Produces<UserInfoResponse>()
+            .WithResponseDescription(StatusCodes.Status200OK, "The user.");
+
+        connect.MapPost("/userinfo", UserInfoAsync)
+            .WithName("GetUserInfoWithPost")
+            .WithSummary("Get the signed-in user, with POST")
+            .WithDescription("The same as `GET /connect/userinfo` (OpenID Connect Core 5.3.1).")
+            .WithMetadata(new RequiresAccessTokenAttribute("openid"))
+            .Produces<UserInfoResponse>()
+            .WithResponseDescription(StatusCodes.Status200OK, "The user.");
+
+        connect.MapGet("/logout", LogoutAsync)
+            .WithName("Logout")
+            .WithSummary("End the browser's registry session")
+            .WithDescription(
+                "Signs the browser out of the registry. Tokens already issued stay valid until they expire; a client " +
+                "signs out locally by deleting them.")
+            .WithQueryParameters(LogoutParameters)
+            .ProducesRedirect("To `post_logout_redirect_uri` when given and registered, otherwise to the registry root.");
+
+        connect.MapPost("/logout", LogoutAsync)
+            .WithName("LogoutWithForm")
+            .WithSummary("End the browser's registry session, with a form body")
+            .WithDescription("The same as `GET /connect/logout`, sent as a form post.")
+            .WithFormParameters(LogoutParameters)
+            .ProducesRedirect("As for `GET /connect/logout`.");
     }
 
     private static OpenIddictRequest GetServerRequest(HttpContext context) =>
@@ -81,9 +185,11 @@ public static class AuthEndpoints
 
         if (!request.IsAuthorizationCodeGrantType() && !request.IsRefreshTokenGrantType())
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "The specified grant type is not supported.");
+            return Results.BadRequest(new OAuthError
+            {
+                Error = Errors.UnsupportedGrantType,
+                ErrorDescription = "The specified grant type is not supported.",
+            });
         }
 
         // Re-materialize the principal stored in the authorization code / refresh token and
@@ -124,18 +230,18 @@ public static class AuthEndpoints
                 authenticationSchemes: [OpenIddictServerAspNetCoreDefaults.AuthenticationScheme]);
         }
 
-        var subject = result.Principal.GetClaim(Claims.Subject);
-        var claims = new Dictionary<string, object?> { [Claims.Subject] = subject };
+        var subject = result.Principal.GetClaim(Claims.Subject)!;
+        if (!Guid.TryParse(subject, out var id) || await db.Users.FindAsync(id) is not { } user)
+            return Results.Ok(new UserInfoResponse { Subject = subject });
 
-        if (Guid.TryParse(subject, out var id) && await db.Users.FindAsync(id) is { } user)
+        return Results.Ok(new UserInfoResponse
         {
-            claims[Claims.PreferredUsername] = user.Login;
-            claims[Claims.Name] = user.Name;
-            claims["github_login"] = user.Login;
-            claims["avatar_url"] = user.AvatarUrl;
-        }
-
-        return Results.Ok(claims);
+            Subject = subject,
+            PreferredUsername = user.Login,
+            Name = user.Name,
+            GitHubLogin = user.Login,
+            AvatarUrl = user.AvatarUrl,
+        });
     }
 
     private static async Task<IResult> LogoutAsync(HttpContext context, CancellationToken cancellationToken)
