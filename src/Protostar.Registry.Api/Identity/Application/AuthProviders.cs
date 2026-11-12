@@ -13,10 +13,19 @@ public sealed record AuthProvider(string Scheme, string DisplayName, string Hint
 /// </summary>
 public static class AuthProviders
 {
-    public static IReadOnlyList<AuthProvider> All { get; } =
-    [
-        new AuthProvider(AuthEndpoints.GitHubScheme, "GitHub", "github"),
-    ];
+    private static readonly AuthProvider GitHub = new(AuthEndpoints.GitHubScheme, "GitHub", "github");
+
+    private static readonly AuthProvider DevelopmentLocal =
+        new(DevelopmentSignInHandler.SchemeName, "Local dev user (Development only)", "dev");
+
+    /// <summary>The providers offered on the sign-in page, in display order.</summary>
+    public static IReadOnlyList<AuthProvider> All { get; private set; } = [GitHub];
+
+    /// <summary>
+    /// Adds the <see cref="DevelopmentSignInHandler"/> provider (hint <c>dev</c>). Call once at startup,
+    /// and only in the Development environment, after registering its authentication scheme.
+    /// </summary>
+    public static void EnableDevelopmentSignIn() => All = [GitHub, DevelopmentLocal];
 
     /// <summary>Resolves a provider by its <see cref="AuthProvider.Hint"/> (case-insensitive).</summary>
     public static AuthProvider? ByHint(string? hint) =>

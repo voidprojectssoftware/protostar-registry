@@ -108,6 +108,30 @@ skips the chooser), the registry federates to GitHub, and the resulting tokens a
 Point at a different registry with `--registry <url>` or `PROTOSTAR_REGISTRY_URL`.
 The CLI checks API compatibility (`/v1/meta`) on connect and refuses an unsupported major.
 
+### Without a GitHub OAuth app: the local dev user
+
+In the Development environment only, the sign-in chooser also offers **Local dev user**, which signs
+you in as one fixed user (`dev`) with no upstream provider. Everything after that step is the real
+flow: `/connect/authorize`, PKCE, the CLI's loopback callback, token issue and refresh, and user
+creation. Use it to try the whole stack, or to let an agent test it, on a machine with no GitHub
+credentials:
+
+```bash
+protostar auth login --provider dev
+```
+
+With `--no-browser`, the CLI prints the sign-in URL instead of opening it, so a script can complete
+the sign-in with any HTTP client that follows redirects and keeps cookies.
+
+On Linux, .NET only trusts the dev certificate when OpenSSL can find it. If the CLI reports a
+certificate error, point it at the trust folder `dotnet dev-certs https --trust` writes:
+
+```bash
+export SSL_CERT_DIR=$HOME/.aspnet/dev-certs/trust:/usr/lib/ssl/certs
+```
+
+The provider is never registered outside Development.
+
 ## Tests
 
 ```bash

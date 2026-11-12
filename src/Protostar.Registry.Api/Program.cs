@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.EntityFrameworkCore;
@@ -70,7 +71,7 @@ builder.Services.AddOpenIddict()
 var gitHubClientId = builder.Configuration["GitHub:ClientId"] ?? "placeholder";
 var gitHubClientSecret = builder.Configuration["GitHub:ClientSecret"] ?? "placeholder";
 
-builder.Services.AddAuthentication(options =>
+var authentication = builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     options.DefaultSignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -103,6 +104,14 @@ builder.Services.AddAuthentication(options =>
         }
     };
 });
+
+// Development only: a "local dev user" sign-in so the full OAuth flow can be exercised end to end
+// without GitHub OAuth app credentials. Never registered outside Development.
+if (builder.Environment.IsDevelopment())
+{
+    authentication.AddScheme<AuthenticationSchemeOptions, DevelopmentSignInHandler>(DevelopmentSignInHandler.SchemeName, null);
+    AuthProviders.EnableDevelopmentSignIn();
+}
 
 // Skill-push endpoints authenticate with a registry access token + "registry" scope, not the default
 // cookie/GitHub login.
