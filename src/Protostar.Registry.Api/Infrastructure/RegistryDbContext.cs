@@ -1,12 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Protostar.Registry.Api.Identity;
+using Protostar.Registry.Api.Sessions;
 using Protostar.Registry.Api.Skills;
 
 namespace Protostar.Registry.Api.Infrastructure;
 
 /// <summary>
 /// The registry database and unit of work. Holds <see cref="User"/> and the <see cref="Skill"/> aggregate
-/// (<see cref="Skill"/>, <see cref="SkillVersion"/>, <see cref="SkillFile"/>) plus OpenIddict's own tables
+/// (<see cref="Skill"/>, <see cref="SkillVersion"/>, <see cref="SkillFile"/>), the sessions feature
+/// (<see cref="Machine"/>, <see cref="Transcript"/>, <see cref="TranscriptChunk"/>; their bytes live in blob storage) plus OpenIddict's own tables
 /// (applications, authorizations, scopes, tokens), added to the model by the <c>UseOpenIddict()</c> call
 /// configured on the context options. As the infrastructure boundary it applies each feature's
 /// <see cref="IEntityTypeConfiguration{TEntity}"/>. Domain events are dispatched by
@@ -22,6 +24,12 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
     public DbSet<SkillVersion> SkillVersions => Set<SkillVersion>();
 
     public DbSet<SkillFile> SkillFiles => Set<SkillFile>();
+
+    public DbSet<Machine> Machines => Set<Machine>();
+
+    public DbSet<Transcript> Transcripts => Set<Transcript>();
+
+    public DbSet<TranscriptChunk> TranscriptChunks => Set<TranscriptChunk>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

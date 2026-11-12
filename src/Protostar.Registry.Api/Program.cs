@@ -10,6 +10,7 @@ using Protostar.Registry.Api;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Sessions;
 using Protostar.Registry.Api.Skills;
 using Scalar.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -127,6 +128,20 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddScoped<SkillPushService>();
 
+// Sessions: transcript bookkeeping in Postgres, transcript bytes in any S3-compatible object store
+// (RustFS under Aspire, which sets ObjectStore__* for the API).
+builder.Services.AddOptions<ObjectStoreOptions>()
+    .Bind(builder.Configuration.GetSection(ObjectStoreOptions.Section))
+    .Validate(o => !string.IsNullOrWhiteSpace(o.AccessKey) && !string.IsNullOrWhiteSpace(o.SecretKey),
+        "ObjectStore:AccessKey and ObjectStore:SecretKey are required.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<IBlobStore, S3BlobStore>();
+builder.Services.AddScoped<TranscriptService>();
+
+// Enums travel as camelCase strings ("session", not 0) in bodies, and bind from either form in queries.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase)));
+
 // Domain events: a dispatcher plus an open-generic logging handler as the placeholder consumer. Real
 // handlers (evaluators, the refinement loop) register their own IDomainEventHandler<T> later.
 builder.Services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
@@ -186,6 +201,7 @@ if (app.Environment.IsDevelopment())
 app.MapAuthEndpoints();
 app.MapLoginEndpoints();
 app.MapSkillEndpoints();
+app.MapSessionEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
 app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors))

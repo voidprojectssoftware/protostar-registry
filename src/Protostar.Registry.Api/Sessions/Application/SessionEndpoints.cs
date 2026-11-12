@@ -1,0 +1,302 @@
+using System.ComponentModel;
+using System.Security.Claims;
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using OpenIddict.Abstractions;
+using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Skills;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+
+namespace Protostar.Registry.Api.Sessions;
+
+/// <summary>The machine and transcript API: register machines, back up transcripts chunk by chunk, list and read them.</summary>
+/// <remarks>Every endpoint acts on the caller's own data only. The handlers stay thin; <see cref="TranscriptService"/> does the work.</remarks>
+public static class SessionEndpoints
+{
+    private const string AppendDescription =
+        """
+        Appends the next chunk of a transcript. Transcripts are append-only, so each chunk must start exactly
+        where the stored content ends: pass the current `revision` and the `offset` equal to its `length`.
+        To start over because the local file was rewritten rather than appended, send `revision` + 1 with
+        `offset` 0; earlier revisions are kept.
+
+        The body is the raw bytes, at most 16 MiB uncompressed, and must end with a newline so every chunk
+        holds whole lines. Send `Content-Encoding: gzip` to upload it compressed, and `X-Content-SHA256`
+        (hex SHA-256 of the uncompressed bytes) to have the registry verify it.
+
+        A `409` means the chunk was not at the current position, usually because an earlier upload partly
+        succeeded or another process got there first. Its body carries the position to resume from.
+        """;
+
+    public static void MapSessionEndpoints(this WebApplication app)
+    {
+        var v1 = app.MapGroup("/v1").RequireAuthorization(SkillEndpoints.Policy).DisableAntiforgery();
+
+        var machines = v1.MapGroup("/machines").WithTags(ApiTags.Machines);
+        machines.MapPut("/{machineId:guid}", RegisterMachineAsync)
+            .WithName("RegisterMachine")
+            .WithSummary("Register this machine")
+            .WithDescription("Registers a machine under an id the client generated, or updates its name and OS. Idempotent.")
+            .Produces<MachineResponse>(StatusCodes.Status201Created)
+            .Produces<MachineResponse>()
+            .WithResponseDescription(StatusCodes.Status201Created, "The machine was registered.")
+            .WithResponseDescription(StatusCodes.Status200OK, "The machine was already registered; its details were updated.");
+        machines.MapGet("", ListMachinesAsync)
+            .WithName("ListMachines")
+            .WithSummary("List my machines")
+            .Produces<MachineResponse[]>();
+
+        var transcripts = v1.MapGroup("/transcripts/{harness}/{key}").WithTags(ApiTags.Transcripts);
+        transcripts.MapPut("", RegisterTranscriptAsync)
+            .WithName("RegisterTranscript")
+            .WithSummary("Register a transcript")
+            .WithDescription("Registers a transcript before its first chunk, or refreshes where it lives. Returns the position the next chunk must start at.")
+            .Produces<TranscriptPositionResponse>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .WithResponseDescription(StatusCodes.Status409Conflict, "Already registered as a different kind (session versus subagent).");
+        transcripts.MapPost("/content", AppendAsync)
+            .WithName("AppendTranscriptContent")
+            .WithSummary("Append a chunk to a transcript")
+            .WithDescription(AppendDescription)
+            .WithMetadata(new RequestSizeLimitAttribute(Transcript.MaxChunkBytes + (1024 * 1024)))
+            .Accepts<byte[]>("application/octet-stream")
+            .Produces<TranscriptPositionResponse>()
+            .WithResponseDescription(StatusCodes.Status200OK, "The chunk was stored. The body is the new position.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .Produces<TranscriptPositionProblem>(StatusCodes.Status409Conflict, "application/problem+json")
+            .WithResponseDescription(StatusCodes.Status409Conflict, "The chunk was not at the current position; `revision` and `length` say where to resume.")
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge);
+        transcripts.MapGet("/content", DownloadAsync)
+            .WithName("DownloadTranscriptContent")
+            .WithSummary("Download a transcript")
+            .WithDescription("Streams the current revision's content as stored: the original JSONL bytes, in order.")
+            .Produces<string>(StatusCodes.Status200OK, "application/x-ndjson")
+            .WithResponseDescription(StatusCodes.Status200OK, "The transcript's JSONL.")
+            .ProducesProblem(StatusCodes.Status404NotFound);
+        transcripts.MapGet("", GetAsync)
+            .WithName("GetTranscript")
+            .WithSummary("Get a transcript's summary")
+            .WithDescription("Returns what the registry parsed from the transcript, and for a session, its subagents.")
+            .Produces<TranscriptDetailResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        v1.MapGet("/transcripts", ListAsync)
+            .WithTags(ApiTags.Transcripts)
+            .WithName("ListTranscripts")
+            .WithSummary("List my transcripts")
+            .WithDescription("Lists sessions (or subagents) from every machine, most recently active first. Page with `before`, passing the last item's `lastActivityAt`.")
+            .Produces<TranscriptResponse[]>();
+    }
+
+    private static async Task<IResult> RegisterMachineAsync(
+        [Description("The machine's id, generated by the client once and kept.")] Guid machineId,
+        RegisterMachineRequest request, ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var (machine, created) = await service.RegisterMachineAsync(ownerId, machineId, request.Name, request.OperatingSystem, cancellationToken);
+        var response = MachineResponse.From(machine);
+        return created ? Results.Created($"/v1/machines/{machine.Id}", response) : Results.Ok(response);
+    }
+
+    private static async Task<IResult> ListMachinesAsync(ClaimsPrincipal user, RegistryDbContext db, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var machines = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(
+            db.Machines.Where(m => m.OwnerId == ownerId).OrderByDescending(m => m.LastSeenAt), cancellationToken);
+        return Results.Ok(machines.Select(MachineResponse.From).ToArray());
+    }
+
+    private static async Task<IResult> RegisterTranscriptAsync(
+        [Description("The harness that wrote the transcript, for example `claude-code`.")] string harness,
+        [Description("The transcript's id within the harness: a session id, or `<session id>.<agent id>` for a subagent.")] string key,
+        RegisterTranscriptRequest request, ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var result = await service.RegisterTranscriptAsync(ownerId, harness, key, request, cancellationToken);
+        return result.Failure == TranscriptFailure.None ? Results.Ok(TranscriptPositionResponse.From(result.Value!)) : Failure(result);
+    }
+
+    private static async Task<IResult> AppendAsync(
+        [Description("The harness that wrote the transcript.")] string harness,
+        [Description("The transcript's key.")] string key,
+        [Description("The revision the chunk belongs to: the current one, or the current one + 1 to start over.")] int revision,
+        [Description("Where the chunk starts: the current `length`, or 0 when starting a new revision.")] long offset,
+        [Description("The registered machine sending the chunk.")] Guid machineId,
+        [FromHeader(Name = "Content-Encoding"), Description("`gzip` when the body is compressed.")] string? contentEncoding,
+        [FromHeader(Name = "X-Content-SHA256"), Description("Hex SHA-256 of the uncompressed chunk, to verify it arrived intact.")] string? contentSha256,
+        HttpRequest request, ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var gzip = string.Equals(contentEncoding, "gzip", StringComparison.OrdinalIgnoreCase);
+        var result = await service.AppendAsync(ownerId, harness, key, revision, offset, machineId, request.Body, gzip, contentSha256, cancellationToken);
+        return result.Failure == TranscriptFailure.None ? Results.Ok(TranscriptPositionResponse.From(result.Value!)) : Failure(result);
+    }
+
+    private static async Task<IResult> DownloadAsync(
+        [Description("The harness that wrote the transcript.")] string harness,
+        [Description("The transcript's key.")] string key,
+        ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var opened = await service.OpenAsync(ownerId, harness, key, cancellationToken);
+        if (opened is not { } found)
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "No transcript with that harness and key.");
+
+        return Results.Stream(
+            stream => service.CopyContentAsync(found.Chunks, stream, cancellationToken),
+            "application/x-ndjson",
+            fileDownloadName: $"{found.Transcript.Key.Value}.jsonl");
+    }
+
+    private static async Task<IResult> GetAsync(
+        [Description("The harness that wrote the transcript.")] string harness,
+        [Description("The transcript's key.")] string key,
+        ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var result = await service.GetAsync(ownerId, harness, key, cancellationToken);
+        if (result.Failure != TranscriptFailure.None)
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Message);
+
+        var (view, subagents) = result.Value;
+        return Results.Ok(TranscriptDetailResponse.From(view, subagents));
+    }
+
+    private static async Task<IResult> ListAsync(
+        ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken,
+        [Description("`session` (default) or `subagent`.")] TranscriptKind kind = TranscriptKind.Session,
+        [Description("Only this harness, for example `claude-code`.")] string? harness = null,
+        [Description("Only transcripts from this machine.")] Guid? machine = null,
+        [Description("Only sessions whose working directory contains this text, for example `protostar`.")] string? project = null,
+        [Description("Only transcripts active at or after this time.")] DateTimeOffset? since = null,
+        [Description("Only transcripts last active before this time; pass the previous page's last `lastActivityAt`.")] DateTimeOffset? before = null,
+        [Description("Page size, 1 to 200.")] int limit = 50)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var views = await service.ListAsync(ownerId, new TranscriptQuery(kind, harness, machine, project, since, before, limit), cancellationToken);
+        return Results.Ok(views.Select(TranscriptResponse.From).ToArray());
+    }
+
+    private static IResult Failure<T>(TranscriptResult<T> result) => result.Failure switch
+    {
+        TranscriptFailure.NotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Message),
+        TranscriptFailure.Conflict => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: result.Message),
+        TranscriptFailure.TooLarge => Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: result.Message),
+        TranscriptFailure.Mismatch => Results.Problem(
+            statusCode: StatusCodes.Status409Conflict,
+            title: result.Message,
+            extensions: new Dictionary<string, object?>
+            {
+                ["revision"] = result.Current!.Revision,
+                ["length"] = result.Current.Length,
+            }),
+        _ => Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: result.Message),
+    };
+
+    private static bool TryGetOwner(ClaimsPrincipal user, out Guid ownerId) =>
+        Guid.TryParse(user.GetClaim(Claims.Subject), out ownerId);
+}
+
+/// <summary>A machine's details as sent when registering it.</summary>
+/// <param name="Name">A display name, usually the host name.</param>
+/// <param name="OperatingSystem">For example <c>linux</c>, <c>windows</c> or <c>macos</c>.</param>
+public sealed record RegisterMachineRequest(string Name, string OperatingSystem);
+
+/// <summary>A registered machine.</summary>
+/// <param name="Id">The client-generated id.</param>
+/// <param name="Name">The display name.</param>
+/// <param name="OperatingSystem">The operating system.</param>
+/// <param name="RegisteredAt">When it first registered.</param>
+/// <param name="LastSeenAt">When it last registered or sent content.</param>
+public sealed record MachineResponse(Guid Id, string Name, string OperatingSystem, DateTimeOffset RegisteredAt, DateTimeOffset LastSeenAt)
+{
+    internal static MachineResponse From(Machine m) => new(m.Id, m.Name, m.OperatingSystem, m.RegisteredAt, m.LastSeenAt);
+}
+
+/// <summary>Where a transcript's stored content ends: the position the next chunk must start at.</summary>
+/// <param name="Harness">The harness id.</param>
+/// <param name="Key">The transcript key.</param>
+/// <param name="Revision">The current revision.</param>
+/// <param name="Length">Bytes stored for the current revision; the next chunk's offset.</param>
+/// <param name="ChunkCount">Chunks stored, across all revisions.</param>
+public sealed record TranscriptPositionResponse(string Harness, string Key, int Revision, long Length, int ChunkCount)
+{
+    internal static TranscriptPositionResponse From(Transcript t) => new(t.Harness.Value, t.Key.Value, t.Revision, t.Length, t.ChunkCount);
+}
+
+/// <summary>A <c>409</c> problem for a chunk that was not at the current position.</summary>
+/// <param name="Title">What went wrong.</param>
+/// <param name="Status">Always 409.</param>
+/// <param name="Revision">The current revision.</param>
+/// <param name="Length">Where the next chunk must start.</param>
+public sealed record TranscriptPositionProblem(string Title, int Status, int Revision, long Length);
+
+/// <summary>A transcript as listings show it: what the registry parsed from it, and where it came from.</summary>
+/// <param name="Harness">The harness that wrote it.</param>
+/// <param name="Key">Its key within the harness.</param>
+/// <param name="Kind">Session or subagent.</param>
+/// <param name="ParentKey">For a subagent, the session it ran in.</param>
+/// <param name="Title">The harness's title for the session, or the first prompt when it has none.</param>
+/// <param name="FirstPrompt">The first thing the user asked, shortened.</param>
+/// <param name="Project">The last segment of the working directory; a display name until projects have a stable identity.</param>
+/// <param name="WorkingDirectory">The working directory on the machine it ran on.</param>
+/// <param name="GitBranch">The branch it was on.</param>
+/// <param name="HarnessVersion">The harness version that last wrote to it.</param>
+/// <param name="MachineId">The machine it came from.</param>
+/// <param name="MachineName">That machine's name.</param>
+/// <param name="SourcePath">The file's path on that machine.</param>
+/// <param name="StartedAt">Its first timestamp.</param>
+/// <param name="LastActivityAt">Its latest timestamp.</param>
+/// <param name="UserMessages">Prompts the user typed.</param>
+/// <param name="AssistantMessages">Replies from the model.</param>
+/// <param name="Lines">Lines stored.</param>
+/// <param name="Length">Bytes stored for the current revision.</param>
+/// <param name="Revision">The current revision.</param>
+/// <param name="SubagentCount">Subagent transcripts backed up for this session.</param>
+public sealed record TranscriptResponse(
+    string Harness, string Key, TranscriptKind Kind, string? ParentKey, string? Title, string? FirstPrompt, string? Project,
+    string? WorkingDirectory, string? GitBranch, string? HarnessVersion, Guid MachineId, string? MachineName, string SourcePath,
+    DateTimeOffset? StartedAt, DateTimeOffset? LastActivityAt, int UserMessages, int AssistantMessages, int Lines, long Length,
+    int Revision, int SubagentCount)
+{
+    internal static TranscriptResponse From(TranscriptView view)
+    {
+        var t = view.Transcript;
+        var s = t.Summary;
+        return new TranscriptResponse(
+            t.Harness.Value, t.Key.Value, t.Kind, t.ParentKey?.Value, s.Title ?? s.FirstPrompt, s.FirstPrompt, ProjectName(s.WorkingDirectory),
+            s.WorkingDirectory, s.GitBranch, s.HarnessVersion, t.MachineId, view.Machine?.Name, t.SourcePath, s.StartedAt, s.LastActivityAt,
+            s.UserMessages, s.AssistantMessages, s.Lines, t.Length, t.Revision, view.SubagentCount);
+    }
+
+    private static string? ProjectName(string? directory) =>
+        directory?.TrimEnd('/', '\\').Split('/', '\\').LastOrDefault(segment => segment.Length > 0);
+}
+
+/// <summary>A transcript with its harness metadata and, for a session, its subagents.</summary>
+/// <param name="Transcript">The transcript.</param>
+/// <param name="Metadata">Harness-specific metadata, such as a Claude Code subagent's type and description.</param>
+/// <param name="Subagents">The session's subagent transcripts, earliest first; empty for a subagent.</param>
+public sealed record TranscriptDetailResponse(TranscriptResponse Transcript, JsonElement? Metadata, IReadOnlyList<TranscriptResponse> Subagents)
+{
+    internal static TranscriptDetailResponse From(TranscriptView view, IReadOnlyList<TranscriptView> subagents) => new(
+        TranscriptResponse.From(view),
+        view.Transcript.MetadataJson is { } json ? JsonDocument.Parse(json).RootElement.Clone() : null,
+        subagents.Select(TranscriptResponse.From).ToList());
+}
