@@ -414,6 +414,111 @@ public sealed class SkillTests
         Assert.Empty(skill.Versions);
     }
 
+    // ----- Rename -----
+
+    [Fact]
+    public void Rename_changes_the_name()
+    {
+        var skill = NewSkill(out var creator, "notes");
+
+        var changed = skill.Rename(creator, "journal", ["notes"]);
+
+        Assert.True(changed);
+        Assert.Equal("journal", skill.Name);
+    }
+
+    [Fact]
+    public void Rename_keeps_the_id_project_and_every_version()
+    {
+        var project = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        var skill = Skill.Create(creator, "notes", Now, project);
+        Push(skill, creator, "v1");
+        Push(skill, creator, "v2");
+        var id = skill.Id;
+        var versions = skill.Versions.Select(v => v.Id).ToList();
+
+        skill.Rename(creator, "journal", ["notes"]);
+
+        Assert.Equal(id, skill.Id);
+        Assert.Equal(project, skill.ProjectId);
+        Assert.Equal(versions, skill.Versions.Select(v => v.Id));
+        Assert.Equal(2, skill.CurrentVersion!.VersionNumber);
+    }
+
+    [Fact]
+    public void Rename_to_the_current_name_changes_nothing_and_says_so()
+    {
+        var skill = NewSkill(out var creator, "notes");
+
+        var changed = skill.Rename(creator, "notes", ["notes"]);
+
+        Assert.False(changed);
+        Assert.Equal("notes", skill.Name);
+    }
+
+    [Fact]
+    public void Rename_to_a_name_taken_in_the_scope_throws_and_leaves_the_name()
+    {
+        var skill = NewSkill(out var creator, "notes");
+
+        var ex = Assert.Throws<SkillNameTakenException>(() => skill.Rename(creator, "journal", ["notes", "journal"]));
+
+        Assert.Equal("journal", ex.Name);
+        Assert.Equal("notes", skill.Name);
+    }
+
+    [Fact]
+    public void Rename_compares_names_exactly_so_a_different_case_is_not_taken()
+    {
+        // ASSUMES: names compare as the (creator, project, name) unique index does, which is case-sensitive.
+        var skill = NewSkill(out var creator, "notes");
+
+        skill.Rename(creator, "Journal", ["notes", "journal"]);
+
+        Assert.Equal("Journal", skill.Name);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    public void Rename_to_an_invalid_name_throws_and_leaves_the_name(string newName)
+    {
+        var skill = NewSkill(out var creator, "notes");
+
+        Assert.Throws<ArgumentException>(() => skill.Rename(creator, newName, ["notes"]));
+        Assert.Equal("notes", skill.Name);
+    }
+
+    [Fact]
+    public void Rename_by_someone_other_than_the_creator_throws()
+    {
+        var skill = NewSkill(out _, "notes");
+
+        Assert.Throws<SkillCreatorViolationException>(() => skill.Rename(Guid.NewGuid(), "journal", ["notes"]));
+        Assert.Equal("notes", skill.Name);
+    }
+
+    // ----- EnsureCanDelete -----
+
+    [Fact]
+    public void EnsureCanDelete_allows_the_creator()
+    {
+        var skill = NewSkill(out var creator);
+
+        skill.EnsureCanDelete(creator);
+    }
+
+    [Fact]
+    public void EnsureCanDelete_refuses_anyone_else()
+    {
+        var skill = NewSkill(out _);
+
+        Assert.Throws<SkillCreatorViolationException>(() => skill.EnsureCanDelete(Guid.NewGuid()));
+    }
+
     // ----- ClearDomainEvents -----
 
     [Fact]

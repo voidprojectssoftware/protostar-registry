@@ -13,36 +13,36 @@ public sealed class SkillCreatorPolicyTests
         Skill.Create(creatorId, "my-skill", DateTimeOffset.UtcNow);
 
     [Fact]
-    public void CanPushVersion_is_true_for_the_skills_creator()
+    public void CanChange_is_true_for_the_skills_creator()
     {
         var creatorId = Guid.NewGuid();
         var skill = NewSkillOwnedBy(creatorId);
 
-        var result = SkillCreatorPolicy.CanPushVersion(skill, creatorId);
+        var result = SkillCreatorPolicy.CanChange(skill, creatorId);
 
         Assert.True(result);
     }
 
     [Fact]
-    public void CanPushVersion_is_false_for_a_different_user()
+    public void CanChange_is_false_for_a_different_user()
     {
         var creatorId = Guid.NewGuid();
         var otherUserId = Guid.NewGuid();
         var skill = NewSkillOwnedBy(creatorId);
 
-        var result = SkillCreatorPolicy.CanPushVersion(skill, otherUserId);
+        var result = SkillCreatorPolicy.CanChange(skill, otherUserId);
 
         Assert.False(result);
     }
 
     [Fact]
-    public void CanPushVersion_is_false_for_the_empty_guid_against_a_real_creator()
+    public void CanChange_is_false_for_the_empty_guid_against_a_real_creator()
     {
         // The empty/anonymous id is not the creator, so it cannot push. (The rule is creator-id
         // equality; a skill created by a real user is never pushable by Guid.Empty.)
         var skill = NewSkillOwnedBy(Guid.NewGuid());
 
-        var result = SkillCreatorPolicy.CanPushVersion(skill, Guid.Empty);
+        var result = SkillCreatorPolicy.CanChange(skill, Guid.Empty);
 
         Assert.False(result);
     }

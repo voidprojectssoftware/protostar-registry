@@ -9,8 +9,8 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace Protostar.Registry.Api.Skills;
 
 /// <summary>
-/// The skills API: push (a single-skill upload and a bulk upload) and read (list my skills, download a
-/// version so another machine can install it).
+/// The skills API: push (a single-skill upload and a bulk upload), read (list my skills, download a
+/// version so another machine can install it), and rename or delete a skill.
 /// </summary>
 /// <remarks>
 /// The pushes take a <c>multipart/form-data</c> body with one file part per file (each part's filename is
@@ -102,7 +102,71 @@ public static class SkillEndpoints
             .Produces<SkillFilesResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapPost("/{name}/rename", RenameAsync)
+            .WithName("RenameSkill")
+            .WithSummary("Rename a skill")
+            .WithDescription(
+                "Renames the caller's skill, keeping its id and every version: nothing is copied. Omit `projectId` " +
+                "for the global skill of that name. The body is `{\"newName\": \"...\"}`; the new name must not be " +
+                "blank or contain `/` or `\\`. 409 when the caller already has a skill of that name in the same " +
+                "project (or among global skills); then nothing changes. Renaming to the current name is a no-op.")
+            .Produces<SkillRenameResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapDelete("/{name}", DeleteAsync)
+            .WithName("DeleteSkill")
+            .WithSummary("Delete a skill")
+            .WithDescription(
+                "Deletes the caller's skill with every version and file it holds. Unrecoverable. Omit `projectId` " +
+                "for the global skill of that name. Returns 204.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
     }
+
+    /// <summary>Renames the caller's skill.</summary>
+    private static async Task<IResult> RenameAsync(
+        string name,
+        [FromQuery] Guid? projectId,
+        SkillRenameRequest request,
+        ClaimsPrincipal user,
+        SkillChangeService changes,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCreator(user, out var creatorId))
+            return Results.Unauthorized();
+
+        var result = await changes.RenameAsync(creatorId, projectId, name, request.NewName ?? "", cancellationToken);
+        return result.Error is null ? Results.Ok(new SkillRenameResponse(name, result.Name!, projectId)) : ChangeFailure(result);
+    }
+
+    /// <summary>Deletes the caller's skill and its versions.</summary>
+    private static async Task<IResult> DeleteAsync(
+        string name,
+        [FromQuery] Guid? projectId,
+        ClaimsPrincipal user,
+        SkillChangeService changes,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCreator(user, out var creatorId))
+            return Results.Unauthorized();
+
+        var result = await changes.DeleteAsync(creatorId, projectId, name, cancellationToken);
+        return result.Error is null ? Results.NoContent() : ChangeFailure(result);
+    }
+
+    private static IResult ChangeFailure(SkillChangeResult result) => Results.Problem(
+        statusCode: result.Error switch
+        {
+            SkillChangeError.NotFound => StatusCodes.Status404NotFound,
+            SkillChangeError.NameTaken => StatusCodes.Status409Conflict,
+            _ => StatusCodes.Status400BadRequest,
+        },
+        title: result.Message);
 
     /// <summary>Lists the caller's skills.</summary>
     private static async Task<IResult> ListAsync(
@@ -316,6 +380,13 @@ public sealed record SkillListResponse(IReadOnlyList<SkillListItem> Skills);
 public sealed record SkillListItem(
     string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes,
     Guid? ProjectId, string? ProjectName);
+
+/// <summary>The JSON body of a rename.</summary>
+public sealed record SkillRenameRequest(string? NewName);
+
+/// <summary>The JSON shape returned by a rename: the skill's name before and after, and its project.</summary>
+/// <remarks><c>ProjectId</c> is null for a global skill. <c>Name</c> equals <c>OldName</c> when the rename was a no-op.</remarks>
+public sealed record SkillRenameResponse(string OldName, string Name, Guid? ProjectId);
 
 /// <summary>The JSON shape returned when downloading a skill version.</summary>
 /// <remarks><c>ProjectId</c> is null for a global skill.</remarks>

@@ -105,6 +105,48 @@ public sealed class Skill : AggregateRoot
         CarriedByFolderKey = carriedByFolderKey;
     }
 
+    /// <summary>Renames this skill, keeping its identity and whole version history.</summary>
+    /// <param name="renamedBy">The user renaming it.</param>
+    /// <param name="newName">The name it takes.</param>
+    /// <param name="namesInScope">
+    /// The names of every skill of the same creator and project (this one included), which the new name must not take.
+    /// </param>
+    /// <returns><c>false</c> when <paramref name="newName"/> is already this skill's name, so nothing changed.</returns>
+    /// <remarks>
+    /// The versions and their files hang off the skill row, so a rename touches only <see cref="Name"/>: nothing is
+    /// copied, and the history reads the same under the new name. Names compare exactly, as the
+    /// (creator, project, name) unique index does.
+    /// </remarks>
+    /// <exception cref="SkillCreatorViolationException"><paramref name="renamedBy"/> is not this skill's creator.</exception>
+    /// <exception cref="ArgumentException"><paramref name="newName"/> fails <see cref="IsValidName"/>.</exception>
+    /// <exception cref="SkillNameTakenException">Another skill in the same scope already has <paramref name="newName"/>.</exception>
+    public bool Rename(Guid renamedBy, string newName, IEnumerable<string> namesInScope)
+    {
+        if (!SkillCreatorPolicy.CanChange(this, renamedBy))
+            throw new SkillCreatorViolationException(Id, renamedBy);
+        if (!IsValidName(newName))
+            throw new ArgumentException("A skill name must not be blank or contain '/' or '\\'.", nameof(newName));
+        if (newName == Name)
+            return false;
+        if (namesInScope.Contains(newName, StringComparer.Ordinal))
+            throw new SkillNameTakenException(newName);
+
+        Name = newName;
+        return true;
+    }
+
+    /// <summary>Checks that <paramref name="deletedBy"/> may delete this skill, with every version and file it holds.</summary>
+    /// <remarks>
+    /// The caller removes the row; the versions and their files cascade from it. Deleting is the aggregate's call
+    /// to allow because the same creator rule guards every change to a skill.
+    /// </remarks>
+    /// <exception cref="SkillCreatorViolationException"><paramref name="deletedBy"/> is not this skill's creator.</exception>
+    public void EnsureCanDelete(Guid deletedBy)
+    {
+        if (!SkillCreatorPolicy.CanChange(this, deletedBy))
+            throw new SkillCreatorViolationException(Id, deletedBy);
+    }
+
     /// <summary>
     /// Pushes a new version of this skill. Returns an idempotent no-op when the files match the current
     /// version byte-for-byte; otherwise appends a version, advances <see cref="CurrentVersion"/>, and
@@ -119,7 +161,7 @@ public sealed class Skill : AggregateRoot
     public SkillVersionPushOutcome PushVersion(
         Guid pushedBy, SkillManifest manifest, IReadOnlyList<SkillFileContent> files, DateTimeOffset now)
     {
-        if (!SkillCreatorPolicy.CanPushVersion(this, pushedBy))
+        if (!SkillCreatorPolicy.CanChange(this, pushedBy))
             throw new SkillCreatorViolationException(Id, pushedBy);
 
         if (SkillSizePolicy.Exceeded(files) is { } reason)
