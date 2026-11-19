@@ -40,11 +40,22 @@ public sealed class Skill : AggregateRoot
     /// <summary>Every version ever pushed, oldest first by <see cref="SkillVersion.VersionNumber"/>.</summary>
     public IReadOnlyCollection<SkillVersion> Versions => _versions;
 
+    /// <summary>True when <paramref name="name"/> can name a skill: not blank and free of <c>/</c> and <c>\</c>.</summary>
+    /// <remarks>
+    /// A skill is addressed by name in URLs (<c>/v1/skills/{name}/files</c>) and installed into a folder of
+    /// that name, so a path separator in it would make the skill impossible to download or install.
+    /// </remarks>
+    public static bool IsValidName(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && name.IndexOfAny(['/', '\\']) < 0;
+
     /// <summary>Starts a new skill owned by <paramref name="creatorId"/>. Its first version is added by a push.</summary>
+    /// <exception cref="ArgumentException"><paramref name="name"/> fails <see cref="IsValidName"/>.</exception>
     public static Skill Create(Guid creatorId, string name, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("A skill must have a name.", nameof(name));
+        if (!IsValidName(name))
+            throw new ArgumentException("A skill name cannot contain '/' or '\\'.", nameof(name));
 
         return new Skill
         {

@@ -83,6 +83,31 @@ public sealed class SkillTests
         Assert.Throws<ArgumentException>(() => Skill.Create(creator, null!, Now));
     }
 
+    [Theory]
+    [InlineData("team/skill")]
+    [InlineData("a\\b")]
+    [InlineData("/lead")]
+    [InlineData("trail/")]
+    public void Create_throws_when_the_name_contains_a_path_separator(string name)
+    {
+        // A name is a URL segment and a folder name, so a separator would make the skill unreachable.
+        var creator = Guid.NewGuid();
+
+        Assert.Throws<ArgumentException>(() => Skill.Create(creator, name, Now));
+    }
+
+    [Theory]
+    [InlineData("team/skill", false)]
+    [InlineData("a\\b", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    [InlineData("my-skill", true)]
+    [InlineData("my skill.v2", true)]
+    public void IsValidName_refuses_blank_names_and_path_separators(string? name, bool expected)
+    {
+        Assert.Equal(expected, Skill.IsValidName(name));
+    }
+
     // ----- First push -----
 
     [Fact]

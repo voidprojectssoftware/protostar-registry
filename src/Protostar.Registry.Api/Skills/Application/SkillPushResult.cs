@@ -21,7 +21,7 @@ public enum SkillPushError
     /// <summary>The upload carried no files.</summary>
     NoFiles,
 
-    /// <summary>A file path was absolute, rooted, empty, or contained a <c>..</c> traversal segment.</summary>
+    /// <summary>A file path failed <see cref="RelativePath.TryCreate"/>, or two paths differ only by case.</summary>
     InvalidPath,
 
     /// <summary>No <c>SKILL.md</c> was present at the skill root.</summary>
@@ -29,6 +29,9 @@ public enum SkillPushError
 
     /// <summary>The SKILL.md declared no name and the pusher supplied none.</summary>
     MissingName,
+
+    /// <summary>The skill's name contains a path separator (see <see cref="Skill.IsValidName"/>).</summary>
+    InvalidName,
 
     /// <summary>The authenticated creator no longer exists in the registry.</summary>
     UnknownCreator,
