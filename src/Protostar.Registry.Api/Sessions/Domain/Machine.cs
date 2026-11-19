@@ -26,6 +26,10 @@ public sealed class Machine
     public DateTimeOffset RegisteredAt { get; private set; }
 
     /// <summary>When the machine last registered or sent content.</summary>
+    /// <remarks>
+    /// Never moves backwards. Concurrent requests each take their own clock reading, and the one saved last may
+    /// have read the clock first; it must not wind the machine back to before a sighting already recorded.
+    /// </remarks>
     public DateTimeOffset LastSeenAt { get; private set; }
 
     /// <summary>Registers a new machine.</summary>
@@ -44,9 +48,13 @@ public sealed class Machine
     {
         Name = string.IsNullOrWhiteSpace(name) ? "unnamed" : name.Trim()[..Math.Min(name.Trim().Length, 200)];
         OperatingSystem = string.IsNullOrWhiteSpace(operatingSystem) ? "unknown" : operatingSystem.Trim().ToLowerInvariant();
-        LastSeenAt = now;
+        Seen(now);
     }
 
     /// <summary>Records that the machine sent content.</summary>
-    public void Seen(DateTimeOffset now) => LastSeenAt = now;
+    public void Seen(DateTimeOffset now)
+    {
+        if (now > LastSeenAt)
+            LastSeenAt = now;
+    }
 }

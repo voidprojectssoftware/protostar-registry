@@ -14,7 +14,7 @@ namespace Protostar.Registry.Api.Sessions;
 public static class SessionEndpoints
 {
     private const string AppendDescription =
-        """
+        $$"""
         Appends the next chunk of a transcript. Transcripts are append-only, so each chunk must start exactly
         where the stored content ends: pass the current `revision` and the `offset` equal to its `length`.
         To start over because the local file was rewritten rather than appended, send `revision` + 1 with
@@ -26,7 +26,18 @@ public static class SessionEndpoints
 
         A `409` means the chunk was not at the current position, usually because an earlier upload partly
         succeeded or another process got there first. Its body carries the position to resume from.
+
+        A `404` with problem `type` `{{SessionProblemTypes.UnknownTranscript}}` means the registry does
+        not know the transcript: register it with `PUT` first. A `400` with problem `type`
+        `{{SessionProblemTypes.UnknownMachine}}` means `machineId` is not registered: register it with
+        `PUT /v1/machines/{machineId}` and retry.
         """;
+
+    private const string UnknownMachineResponse =
+        $"Invalid request. When the machine is not registered, the problem `type` is `{SessionProblemTypes.UnknownMachine}`; register it with `PUT /v1/machines/{{machineId}}` and retry.";
+
+    private const string UnknownTranscriptResponse =
+        $"No transcript with that harness and key. The problem `type` is `{SessionProblemTypes.UnknownTranscript}`.";
 
     public static void MapSessionEndpoints(this WebApplication app)
     {
@@ -36,7 +47,7 @@ public static class SessionEndpoints
         machines.MapPut("/{machineId:guid}", RegisterMachineAsync)
             .WithName("RegisterMachine")
             .WithSummary("Register this machine")
-            .WithDescription("Registers a machine under an id the client generated, or updates its name and OS. Idempotent.")
+            .WithDescription("Registers a machine under an id the client generated, or updates its name and OS. Idempotent, including under concurrency: when several requests register the same new id at once, one gets `201` and the rest get `200`, all naming the one machine.")
             .Produces<MachineResponse>(StatusCodes.Status201Created)
             .Produces<MachineResponse>()
             .WithResponseDescription(StatusCodes.Status201Created, "The machine was registered.")
@@ -53,6 +64,7 @@ public static class SessionEndpoints
             .WithDescription("Registers a transcript before its first chunk, or refreshes where it lives. Returns the position the next chunk must start at.")
             .Produces<TranscriptPositionResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
+            .WithResponseDescription(StatusCodes.Status400BadRequest, UnknownMachineResponse)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .WithResponseDescription(StatusCodes.Status409Conflict, "Already registered as a different kind (session versus subagent).");
         transcripts.MapPost("/content", AppendAsync)
@@ -64,7 +76,9 @@ public static class SessionEndpoints
             .Produces<TranscriptPositionResponse>()
             .WithResponseDescription(StatusCodes.Status200OK, "The chunk was stored. The body is the new position.")
             .ProducesProblem(StatusCodes.Status400BadRequest)
+            .WithResponseDescription(StatusCodes.Status400BadRequest, UnknownMachineResponse)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse)
             .Produces<TranscriptPositionProblem>(StatusCodes.Status409Conflict, "application/problem+json")
             .WithResponseDescription(StatusCodes.Status409Conflict, "The chunk was not at the current position; `revision` and `length` say where to resume.")
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge);
@@ -74,13 +88,15 @@ public static class SessionEndpoints
             .WithDescription("Streams the current revision's content as stored: the original JSONL bytes, in order.")
             .Produces<string>(StatusCodes.Status200OK, "application/x-ndjson")
             .WithResponseDescription(StatusCodes.Status200OK, "The transcript's JSONL.")
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
         transcripts.MapGet("", GetAsync)
             .WithName("GetTranscript")
             .WithSummary("Get a transcript's summary")
             .WithDescription("Returns what the registry parsed from the transcript, and for a session, its subagents.")
             .Produces<TranscriptDetailResponse>()
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
 
         v1.MapGet("/transcripts", ListAsync)
             .WithTags(ApiTags.Transcripts)
@@ -152,7 +168,7 @@ public static class SessionEndpoints
 
         var opened = await service.OpenAsync(ownerId, harness, key, cancellationToken);
         if (opened is not { } found)
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "No transcript with that harness and key.");
+            return Failure(TranscriptResult<Transcript>.NotFound());
 
         return Results.Stream(
             stream => service.CopyContentAsync(found.Chunks, stream, cancellationToken),
@@ -170,7 +186,7 @@ public static class SessionEndpoints
 
         var result = await service.GetAsync(ownerId, harness, key, cancellationToken);
         if (result.Failure != TranscriptFailure.None)
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Message);
+            return Failure(result);
 
         var (view, subagents) = result.Value;
         return Results.Ok(TranscriptDetailResponse.From(view, subagents));
@@ -195,7 +211,8 @@ public static class SessionEndpoints
 
     private static IResult Failure<T>(TranscriptResult<T> result) => result.Failure switch
     {
-        TranscriptFailure.NotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Message),
+        TranscriptFailure.UnknownMachine => Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: result.Message, type: SessionProblemTypes.UnknownMachine),
+        TranscriptFailure.NotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Message, type: SessionProblemTypes.UnknownTranscript),
         TranscriptFailure.Conflict => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: result.Message),
         TranscriptFailure.TooLarge => Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: result.Message),
         TranscriptFailure.Mismatch => Results.Problem(
@@ -211,6 +228,20 @@ public static class SessionEndpoints
 
     private static bool TryGetOwner(ClaimsPrincipal user, out Guid ownerId) =>
         Guid.TryParse(user.GetClaim(Claims.Subject), out ownerId);
+}
+
+/// <summary>Problem <c>type</c> URIs that identify a refusal independently of its title.</summary>
+/// <remarks>
+/// Clients branch on these, not on the title text, which is for people. The titles stay as they were because
+/// released clients match them. The URIs are identifiers and need not resolve.
+/// </remarks>
+public static class SessionProblemTypes
+{
+    /// <summary>The request named a machine the caller has not registered (status <c>400</c>).</summary>
+    public const string UnknownMachine = "https://protostar.dev/problems/unknown-machine";
+
+    /// <summary>No transcript with that harness and key (status <c>404</c>).</summary>
+    public const string UnknownTranscript = "https://protostar.dev/problems/unknown-transcript";
 }
 
 /// <summary>A machine's details as sent when registering it.</summary>
