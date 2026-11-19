@@ -7,13 +7,15 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace Protostar.Registry.Api.Skills;
 
 /// <summary>
-/// The skill-push API: a single-skill upload and a bulk upload. Both take a <c>multipart/form-data</c>
-/// body with one file part per file (each part's filename is the path relative to the skill directory
-/// root). The creator is the authenticated caller; the body never names it. The endpoints stay thin and
-/// hand the work to <see cref="SkillPushService"/>.
+/// The skills API: push (a single-skill upload and a bulk upload) and read (list my skills, download a
+/// version so another machine can install it).
 /// </summary>
 /// <remarks>
-/// The handlers bind the upload as parameters (<see cref="IFormFileCollection"/> plus a <c>name</c> field)
+/// The pushes take a <c>multipart/form-data</c> body with one file part per file (each part's filename is
+/// the path relative to the skill directory root). The creator is the authenticated caller; the body never
+/// names it, and reads only ever return the caller's own skills. The endpoints stay thin and hand the work
+/// to <see cref="SkillPushService"/> and <see cref="SkillQueryService"/>.
+/// The push handlers bind the upload as parameters (<see cref="IFormFileCollection"/> plus a <c>name</c> field)
 /// rather than reading the request directly, so the framework describes the multipart body in the OpenAPI
 /// document. Antiforgery is disabled because callers authenticate with a bearer token, not a browser form.
 /// </remarks>
@@ -66,6 +68,68 @@ public static class SkillEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge);
+
+        group.MapGet("", ListAsync)
+            .WithName("ListSkills")
+            .WithSummary("List my skills")
+            .WithDescription(
+                "Lists every skill the caller has pushed, each described by its current version: name, " +
+                "description, version number, content hash, push time, file count, and total size. Sorted " +
+                "by name. The content hash is SHA-256 over each file's `<path>\\n<UPPERCASE hex sha256>\\n`, " +
+                "files ordered by path (ordinal), as uppercase hex, so a client can tell whether its local " +
+                "copy matches without downloading it.")
+            .Produces<SkillListResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapGet("/{name}/files", GetFilesAsync)
+            .WithName("GetSkillFiles")
+            .WithSummary("Download a skill version")
+            .WithDescription(
+                "Returns one version of the caller's skill with every file's bytes (base64 in JSON). " +
+                "Omit `version` for the current version. Paths are relative to the skill root with `/` " +
+                "separators and never absolute or containing `..`.")
+            .Produces<SkillFilesResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+    }
+
+    /// <summary>Lists the caller's skills.</summary>
+    private static async Task<IResult> ListAsync(
+        ClaimsPrincipal user, SkillQueryService queries, CancellationToken cancellationToken)
+    {
+        if (!TryGetCreator(user, out var creatorId))
+            return Results.Unauthorized();
+
+        var skills = await queries.ListAsync(creatorId, cancellationToken);
+        return Results.Ok(new SkillListResponse(skills.Select(s => new SkillListItem(
+            s.Name, s.Description, s.Version, s.ContentHash, s.UpdatedAt, s.FileCount, s.TotalBytes)).ToArray()));
+    }
+
+    /// <summary>Returns one version of the caller's skill, files included.</summary>
+    private static async Task<IResult> GetFilesAsync(
+        string name,
+        [FromQuery] int? version,
+        ClaimsPrincipal user,
+        SkillQueryService queries,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCreator(user, out var creatorId))
+            return Results.Unauthorized();
+
+        var content = await queries.GetContentAsync(creatorId, name, version, cancellationToken);
+        if (content is null)
+        {
+            var what = version is { } v ? $"version {v} of skill '{name}'" : $"skill '{name}'";
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: $"You have no {what}.");
+        }
+
+        return Results.Ok(new SkillFilesResponse(
+            content.Name,
+            content.Version,
+            content.Description,
+            content.ContentHash,
+            content.PushedAt,
+            content.Files.Select(f => new SkillFileResponse(f.Path, f.Size, f.Sha256, f.Content)).ToArray()));
     }
 
     /// <summary>
@@ -199,3 +263,17 @@ public sealed record SkillPushResponse(
 
 /// <summary>The JSON shape returned by the bulk endpoint: one <see cref="SkillPushResponse"/> per skill.</summary>
 public sealed record SkillBulkPushResponse(IReadOnlyList<SkillPushResponse> Skills);
+
+/// <summary>The JSON shape returned by the list endpoint.</summary>
+public sealed record SkillListResponse(IReadOnlyList<SkillListItem> Skills);
+
+/// <summary>One skill in <see cref="SkillListResponse"/>, described by its current version.</summary>
+public sealed record SkillListItem(
+    string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes);
+
+/// <summary>The JSON shape returned when downloading a skill version.</summary>
+public sealed record SkillFilesResponse(
+    string Name, int Version, string? Description, string ContentHash, DateTimeOffset PushedAt, IReadOnlyList<SkillFileResponse> Files);
+
+/// <summary>One file in <see cref="SkillFilesResponse"/>; <c>Content</c> is base64 in JSON.</summary>
+public sealed record SkillFileResponse(string Path, long Size, string Sha256, byte[] Content);
