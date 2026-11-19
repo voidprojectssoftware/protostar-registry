@@ -30,24 +30,40 @@ public sealed class TranscriptService
     }
 
     /// <summary>Registers <paramref name="machineId"/>, or refreshes its details. Returns the machine and whether it was new.</summary>
+    /// <remarks>
+    /// Safe to call concurrently for the same new id: one caller inserts the machine, and every caller that
+    /// loses the insert race refreshes the row the winner inserted instead, so all of them succeed with that one row.
+    /// </remarks>
     public async Task<(Machine Machine, bool Created)> RegisterMachineAsync(
         Guid ownerId, Guid machineId, string name, string operatingSystem, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var machine = await _db.Machines.FirstOrDefaultAsync(m => m.OwnerId == ownerId && m.Id == machineId, cancellationToken);
-        var created = machine is null;
-        if (machine is null)
-        {
-            machine = Machine.Register(machineId, ownerId, name, operatingSystem, now);
-            _db.Machines.Add(machine);
-        }
-        else
+        var machine = await FindMachineAsync(ownerId, machineId, cancellationToken);
+        if (machine is not null)
         {
             machine.Update(name, operatingSystem, now);
+            await _db.SaveChangesAsync(cancellationToken);
+            return (machine, false);
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
-        return (machine, created);
+        machine = Machine.Register(machineId, ownerId, name, operatingSystem, now);
+        _db.Machines.Add(machine);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            return (machine, true);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // The new machine is the only change in this save, so a duplicate key means another request
+            // registered this id between our read and our insert: treat it as the update it now is. Any other
+            // database error is not caught.
+            _db.ChangeTracker.Clear();
+            var existing = await FindMachineAsync(ownerId, machineId, cancellationToken);
+            existing!.Update(name, operatingSystem, now);
+            await _db.SaveChangesAsync(cancellationToken);
+            return (existing, false);
+        }
     }
 
     /// <summary>Registers a transcript, or refreshes where it lives, and files it under its project. Returns its current position.</summary>
@@ -70,7 +86,7 @@ public sealed class TranscriptService
             return TranscriptResult<Transcript>.Invalid(badFacts);
 
         if (!await _db.Machines.AnyAsync(m => m.OwnerId == ownerId && m.Id == request.MachineId, cancellationToken))
-            return TranscriptResult<Transcript>.Invalid($"Machine {request.MachineId} is not registered. Register it with PUT /v1/machines/{{machineId}} first.");
+            return TranscriptResult<Transcript>.UnknownMachine($"Machine {request.MachineId} is not registered. Register it with PUT /v1/machines/{{machineId}} first.");
 
         // Resolve first: resolution saves any new project and may reset the change tracker on a race.
         var filing = request.Project is { } facts
@@ -118,9 +134,9 @@ public sealed class TranscriptService
         if (transcript is null)
             return TranscriptResult<Transcript>.NotFound();
 
-        var machine = await _db.Machines.FirstOrDefaultAsync(m => m.OwnerId == ownerId && m.Id == machineId, cancellationToken);
+        var machine = await FindMachineAsync(ownerId, machineId, cancellationToken);
         if (machine is null)
-            return TranscriptResult<Transcript>.Invalid($"Machine {machineId} is not registered.");
+            return TranscriptResult<Transcript>.UnknownMachine($"Machine {machineId} is not registered.");
 
         // Check the position before storing anything, so a stale client leaves no orphaned blob behind.
         if (!transcript.AcceptsChunkAt(revision, offset))
@@ -276,6 +292,9 @@ public sealed class TranscriptService
         }
     }
 
+    private Task<Machine?> FindMachineAsync(Guid ownerId, Guid machineId, CancellationToken cancellationToken) =>
+        _db.Machines.FirstOrDefaultAsync(m => m.OwnerId == ownerId && m.Id == machineId, cancellationToken);
+
     private Task<Transcript?> FindAsync(Guid ownerId, HarnessId harness, TranscriptKey key, CancellationToken cancellationToken) =>
         _db.Transcripts.FirstOrDefaultAsync(t => t.OwnerId == ownerId && t.Harness == harness && t.Key == key, cancellationToken);
 
@@ -386,6 +405,11 @@ public enum TranscriptFailure
 {
     None,
     Invalid,
+
+    /// <summary>The request named a machine the caller has not registered.</summary>
+    UnknownMachine,
+
+    /// <summary>No transcript with that harness and key.</summary>
     NotFound,
     Conflict,
     Mismatch,
@@ -397,6 +421,7 @@ public sealed record TranscriptResult<T>(TranscriptFailure Failure, T? Value, st
 {
     public static TranscriptResult<T> Ok(T value) => new(TranscriptFailure.None, value, null, null);
     public static TranscriptResult<T> Invalid(string message) => new(TranscriptFailure.Invalid, default, message, null);
+    public static TranscriptResult<T> UnknownMachine(string message) => new(TranscriptFailure.UnknownMachine, default, message, null);
     public static TranscriptResult<T> NotFound() => new(TranscriptFailure.NotFound, default, "No transcript with that harness and key.", null);
     public static TranscriptResult<T> Conflict(string message) => new(TranscriptFailure.Conflict, default, message, null);
     public static TranscriptResult<T> TooLarge(string message) => new(TranscriptFailure.TooLarge, default, message, null);
