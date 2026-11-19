@@ -11,6 +11,7 @@ public sealed class SkillConfiguration : IEntityTypeConfiguration<Skill>
     {
         builder.HasKey(s => s.Id);
         builder.Property(s => s.Name).IsRequired();
+        builder.Property(s => s.CarriedByFolderKey).HasMaxLength(ProjectKey.MaxLength);
 
         // One skill per (creator, project, name), where a null project is the creator's global skill. Postgres
         // treats NULLs as distinct in a unique index by default, which would let two global skills share a

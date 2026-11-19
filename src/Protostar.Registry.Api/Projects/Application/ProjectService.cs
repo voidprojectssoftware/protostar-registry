@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Skills;
 
 namespace Protostar.Registry.Api.Projects;
 
@@ -44,19 +45,13 @@ public sealed class ProjectService
 
             var now = DateTimeOffset.UtcNow;
             var project = match.ProjectId is { } id
-                ? await _db.Projects.Include(p => p.Keys).SingleAsync(p => p.Id == id, cancellationToken)
+                ? await LoadAsync(id, cancellationToken)
                 : _db.Projects.Add(Project.Create(ownerId, identity.Name, now)).Entity;
 
             if (ProjectMatcher.Renames(identity, match.RecognisedBy))
                 project.Rename(identity.Name, now);
 
-            var toAttach = ProjectMatcher.KeysToAttach(identity, match.RecognisedBy);
-            var claimed = await KnownKeysAsync(ownerId, toAttach, cancellationToken);
-            foreach (var (kind, key) in toAttach)
-            {
-                if (!claimed.Any(k => k.Kind == kind && k.Key == key && k.ProjectId != project.Id))
-                    project.Attach(kind, key, now);
-            }
+            await AttachKeysAsync(ownerId, project, identity, match.RecognisedBy, now, cancellationToken);
 
             try
             {
@@ -108,73 +103,152 @@ public sealed class ProjectService
     }
 
     /// <summary>Links the folder of <paramref name="identity"/> to the project named by <paramref name="target"/>, an id or an exact name.</summary>
-    /// <remarks>Replaces any link the folder had. The folder's transcripts move with it (<see cref="FolderLinkChanged"/>).</remarks>
+    /// <remarks>
+    /// Replaces any link the folder had. The folder's transcripts move with it (<see cref="FolderLinkChanged"/>),
+    /// and so do its project skills (<see cref="FolderSkillMove"/>), in the same save as the link. If the target
+    /// already has a skill of a name the folder would bring, nothing changes and the clash is reported.
+    /// </remarks>
     public async Task<ProjectLinkResult> LinkAsync(Guid ownerId, ProjectIdentity identity, string target, CancellationToken cancellationToken)
     {
         var candidates = Guid.TryParse(target, out var targetId)
             ? await _db.Projects.Include(p => p.Keys).Where(p => p.OwnerId == ownerId && p.Id == targetId).ToListAsync(cancellationToken)
             : await _db.Projects.Include(p => p.Keys).Where(p => p.OwnerId == ownerId && p.Name.ToLower() == target.ToLower()).ToListAsync(cancellationToken);
         if (candidates.Count == 0)
-            return ProjectLinkResult.Fail($"No project '{target}'. Use its id, or its full name as `protostar project` or `sessions list` shows it.");
+            return ProjectLinkResult.Fail(ProjectLinkFailure.UnknownProject, $"No project '{target}'. Use its id, or its full name as `protostar project` or `sessions list` shows it.");
         if (candidates.Count > 1)
-            return ProjectLinkResult.Fail($"More than one project is named '{target}'. Use its id: {string.Join(", ", candidates.Select(p => p.Id))}.");
+            return ProjectLinkResult.Fail(ProjectLinkFailure.UnknownProject, $"More than one project is named '{target}'. Use its id: {string.Join(", ", candidates.Select(p => p.Id))}.");
 
         var project = candidates[0];
         var now = DateTimeOffset.UtcNow;
-        var linked = await LinkedProjectAsync(ownerId, identity, cancellationToken);
-        if (linked is not null && linked.Id != project.Id)
-            linked.Unlink(identity.FolderKey, now);
-        project.Link(identity.FolderKey, now);
+        var match = await MatchAsync(ownerId, identity, cancellationToken);
+        IReadOnlyList<Skill> following = [];
+        if (match.ProjectId is { } fromId && fromId != project.Id)
+        {
+            var from = await LoadAsync(fromId, cancellationToken);
+            following = await FollowingAsync(from, identity.FolderKey, cancellationToken);
+            if (match.RecognisedBy == ProjectRecognition.Link)
+                from.Unlink(identity.FolderKey, now);
+        }
 
-        await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
-        return ProjectLinkResult.Ok(ProjectLinkOutcome.Linked, await ShowAsync(ownerId, identity, cancellationToken));
+        project.Link(identity.FolderKey, now);
+        return await MoveSkillsAndSaveAsync(ProjectLinkOutcome.Linked, ownerId, identity, following, project, cancellationToken);
     }
 
     /// <summary>Unlinks the folder of <paramref name="identity"/>: back to where it would belong on its own, or, if it already is there by a shared key, apart.</summary>
     /// <remarks>
     /// A linked folder loses its link. A folder that belongs to a project by a key other copies share (a fork by
     /// its upstream's root commit, ADR 0002's owner decision 1) is given a project of its own and linked to it,
-    /// so its sessions stay apart. A folder that is already its own project is left alone.
+    /// so its sessions stay apart. A folder that is already its own project is left alone. The folder's project
+    /// skills move with it as on a link (<see cref="FolderSkillMove"/>), so unlinking undoes what linking moved.
     /// </remarks>
     public async Task<ProjectLinkResult> UnlinkAsync(Guid ownerId, ProjectIdentity identity, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var match = await MatchAsync(ownerId, identity, cancellationToken);
+        if (match.ProjectId is not { } fromId || match.RecognisedBy is not (ProjectRecognition.Link or ProjectRecognition.RootCommit or ProjectRecognition.PreviousRootCommit or ProjectRecognition.Remote))
+            return ProjectLinkResult.Ok(ProjectLinkOutcome.NothingToUnlink, await ShowAsync(ownerId, identity, cancellationToken), []);
+
+        var from = await LoadAsync(fromId, cancellationToken);
+        var following = await FollowingAsync(from, identity.FolderKey, cancellationToken);
         ProjectLinkOutcome outcome;
-        if (await LinkedProjectAsync(ownerId, identity, cancellationToken) is { } linked)
+        Project? to;
+        if (match.RecognisedBy == ProjectRecognition.Link)
         {
-            linked.Unlink(identity.FolderKey, now);
+            from.Unlink(identity.FolderKey, now);
             outcome = ProjectLinkOutcome.Unlinked;
-        }
-        else if ((await MatchAsync(ownerId, identity, cancellationToken)).RecognisedBy is ProjectRecognition.RootCommit or ProjectRecognition.PreviousRootCommit or ProjectRecognition.Remote)
-        {
-            var own = Project.Create(ownerId, $"{identity.Name} ({identity.Folder})", now);
-            _db.Projects.Add(own);
-            own.Link(identity.FolderKey, now);
-            outcome = ProjectLinkOutcome.Separated;
+            var own = await MatchAsync(ownerId, identity, cancellationToken, ignoringLink: true);
+            to = own.ProjectId is { } ownId ? await LoadAsync(ownId, cancellationToken)
+                : following.Count > 0 ? await CreateOwnProjectAsync(ownerId, identity, now, cancellationToken)
+                : null;
         }
         else
         {
-            return ProjectLinkResult.Ok(ProjectLinkOutcome.NothingToUnlink, await ShowAsync(ownerId, identity, cancellationToken));
+            to = _db.Projects.Add(Project.Create(ownerId, $"{identity.Name} ({identity.Folder})", now)).Entity;
+            to.Link(identity.FolderKey, now);
+            outcome = ProjectLinkOutcome.Separated;
         }
 
-        await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
-        return ProjectLinkResult.Ok(outcome, await ShowAsync(ownerId, identity, cancellationToken));
+        if (to is null || to.Id == from.Id)
+            following = [];
+        return await MoveSkillsAndSaveAsync(outcome, ownerId, identity, following, to, cancellationToken);
     }
 
-    private async Task<ProjectMatch> MatchAsync(Guid ownerId, ProjectIdentity identity, CancellationToken cancellationToken)
+    /// <summary>The skills of <paramref name="from"/> that go with the folder when it leaves; call before changing the folder's keys.</summary>
+    private async Task<IReadOnlyList<Skill>> FollowingAsync(Project from, string folderKey, CancellationToken cancellationToken)
+    {
+        var skills = await _db.Skills.Where(s => s.ProjectId == from.Id).ToListAsync(cancellationToken);
+        return FolderSkillMove.Following(from, skills, folderKey);
+    }
+
+    /// <summary>Moves <paramref name="following"/> into <paramref name="to"/> and saves it with the key changes already made, or refuses everything on a name clash.</summary>
+    /// <remarks>
+    /// One <c>SaveChanges</c> is one transaction, so a link never lands with half its skills moved. A clash found
+    /// here leaves the tracked changes unsaved; one that a concurrent push creates after the check fails the
+    /// (creator, project, name) unique index, which rolls back the same way.
+    /// </remarks>
+    private async Task<ProjectLinkResult> MoveSkillsAndSaveAsync(
+        ProjectLinkOutcome outcome, Guid ownerId, ProjectIdentity identity, IReadOnlyList<Skill> following, Project? to, CancellationToken cancellationToken)
+    {
+        if (following.Count > 0)
+        {
+            var present = await _db.Skills.AsNoTracking().Where(s => s.ProjectId == to!.Id)
+                .Select(s => new { s.CreatorId, s.Name }).ToListAsync(cancellationToken);
+            var clashes = FolderSkillMove.Clashes(following, present.Select(p => (p.CreatorId, p.Name)));
+            if (clashes.Count > 0)
+                return ProjectLinkResult.Fail(
+                    ProjectLinkFailure.SkillNameClash,
+                    $"Nothing changed: '{to!.Name}' already has {(clashes.Count == 1 ? "a skill" : "skills")} named {string.Join(", ", clashes)}, " +
+                    "and this folder's project skills of the same name would go there with it. Two version histories are never merged.");
+            FolderSkillMove.Move(following, to!, identity.FolderKey);
+        }
+
+        try
+        {
+            await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return ProjectLinkResult.Fail(
+                ProjectLinkFailure.SkillNameClash,
+                "Nothing changed: a skill of the same name was pushed to the destination while this folder was moving. Run it again to see which.");
+        }
+
+        var moved = following.Select(s => s.Name).Order(StringComparer.Ordinal).ToList();
+        return ProjectLinkResult.Ok(outcome, await ShowAsync(ownerId, identity, cancellationToken), moved);
+    }
+
+    /// <summary>Creates the project a folder would get from its first backup, for skills to go back to when there is none.</summary>
+    private async Task<Project> CreateOwnProjectAsync(Guid ownerId, ProjectIdentity identity, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var project = _db.Projects.Add(Project.Create(ownerId, identity.Name, now)).Entity;
+        await AttachKeysAsync(ownerId, project, identity, ProjectRecognition.New, now, cancellationToken);
+        return project;
+    }
+
+    /// <summary>Attaches the keys <paramref name="identity"/> gives its project, except those another of the owner's projects already holds.</summary>
+    private async Task AttachKeysAsync(
+        Guid ownerId, Project project, ProjectIdentity identity, ProjectRecognition recognisedBy, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var toAttach = ProjectMatcher.KeysToAttach(identity, recognisedBy);
+        var claimed = await KnownKeysAsync(ownerId, toAttach, cancellationToken);
+        foreach (var (kind, key) in toAttach)
+        {
+            if (!claimed.Any(k => k.Kind == kind && k.Key == key && k.ProjectId != project.Id))
+                project.Attach(kind, key, now);
+        }
+    }
+
+    private Task<Project> LoadAsync(Guid projectId, CancellationToken cancellationToken) =>
+        _db.Projects.Include(p => p.Keys).SingleAsync(p => p.Id == projectId, cancellationToken);
+
+    /// <summary>Matches <paramref name="identity"/>; with <paramref name="ignoringLink"/>, as if the folder had no link (where an unlink sends it).</summary>
+    private async Task<ProjectMatch> MatchAsync(Guid ownerId, ProjectIdentity identity, CancellationToken cancellationToken, bool ignoringLink = false)
     {
         var known = await KnownKeysAsync(ownerId, ProjectMatcher.CandidateKeys(identity), cancellationToken);
+        if (ignoringLink)
+            known.RemoveAll(k => k.Kind == ProjectKeyKind.Link);
         var folderProjects = await _filings.ProjectsOfFolderAsync(ownerId, identity, cancellationToken);
         return ProjectMatcher.Match(identity, known, folderProjects);
-    }
-
-    private async Task<Project?> LinkedProjectAsync(Guid ownerId, ProjectIdentity identity, CancellationToken cancellationToken)
-    {
-        var projectId = await _db.ProjectKeys
-            .Where(k => k.OwnerId == ownerId && k.Kind == ProjectKeyKind.Link && k.Key == identity.FolderKey)
-            .Select(k => (Guid?)k.ProjectId)
-            .FirstOrDefaultAsync(cancellationToken);
-        return projectId is { } id ? await _db.Projects.Include(p => p.Keys).SingleAsync(p => p.Id == id, cancellationToken) : null;
     }
 
     private async Task<List<ProjectKey>> KnownKeysAsync(
@@ -222,12 +296,22 @@ public enum ProjectLinkOutcome
     NothingToUnlink,
 }
 
-/// <summary>The result of a link or unlink: the outcome and where the folder belongs now, or why it failed.</summary>
-public sealed record ProjectLinkResult(ProjectLinkOutcome Outcome, ProjectView? View, string? Error)
+/// <summary>Why a link or unlink was refused.</summary>
+public enum ProjectLinkFailure
 {
-    public static ProjectLinkResult Ok(ProjectLinkOutcome outcome, ProjectView view) => new(outcome, view, null);
+    /// <summary>No project, or more than one, answers to the name or id given.</summary>
+    UnknownProject,
 
-    public static ProjectLinkResult Fail(string error) => new(default, null, error);
+    /// <summary>The destination already has a skill of a name the folder's skills would bring (<see cref="FolderSkillMove"/>).</summary>
+    SkillNameClash,
+}
+
+/// <summary>The result of a link or unlink: the outcome, where the folder belongs now and which skills moved with it, or why it failed.</summary>
+public sealed record ProjectLinkResult(ProjectLinkOutcome Outcome, ProjectView? View, IReadOnlyList<string> MovedSkills, ProjectLinkFailure? Failure, string? Error)
+{
+    public static ProjectLinkResult Ok(ProjectLinkOutcome outcome, ProjectView view, IReadOnlyList<string> movedSkills) => new(outcome, view, movedSkills, null, null);
+
+    public static ProjectLinkResult Fail(ProjectLinkFailure failure, string error) => new(default, null, [], failure, error);
 }
 
 /// <summary>Which projects a folder's sessions are filed under now: the port the Sessions feature fills.</summary>
