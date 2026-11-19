@@ -1,5 +1,7 @@
 using Protostar.Registry.Api.Infrastructure;
 using System.Security.Claims;
+using System.Text.Json;
+using Protostar.Registry.Api.Projects;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -18,6 +20,10 @@ namespace Protostar.Registry.Api.Skills;
 /// The push handlers bind the upload as parameters (<see cref="IFormFileCollection"/> plus a <c>name</c> field)
 /// rather than reading the request directly, so the framework describes the multipart body in the OpenAPI
 /// document. Antiforgery is disabled because callers authenticate with a bearer token, not a browser form.
+/// A skill is global unless it belongs to a project (ADR 0002): a push names the project by sending the
+/// project folder's facts in a <c>project</c> field, and reads name it by <c>projectId</c>. Without either,
+/// every endpoint behaves exactly as it did before project skills, so older clients keep working on global
+/// skills.
 /// </remarks>
 public static class SkillEndpoints
 {
@@ -44,7 +50,11 @@ public static class SkillEndpoints
             .WithDescription(
                 "Uploads one skill as multipart/form-data: one file part per file, where each part's " +
                 "filename is the path relative to the skill root (so SKILL.md sits at the root). An optional " +
-                "`name` field names the skill when its SKILL.md omits one. The creator is the authenticated " +
+                "`name` field names the skill when its SKILL.md omits one. An optional `project` field makes it " +
+                "a project skill: JSON `{\"machineId\": ..., \"facts\": {...}}`, the same folder description " +
+                "`POST /v1/projects/resolve` takes, resolved to a project the way sessions are filed. Without it " +
+                "the skill is global. A skill is identified by creator, project and name, so a global skill and " +
+                "a project skill of the same name never share versions. The creator is the authenticated " +
                 "caller. Returns 201 when a new version is stored, or 200 when the push matches the current " +
                 "version byte-for-byte.")
             .WithMetadata(new RequestSizeLimitAttribute(SingleUploadMaxBytes))
@@ -61,8 +71,8 @@ public static class SkillEndpoints
             .WithDescription(
                 "Uploads several skills at once as multipart/form-data. Each file part's filename is prefixed " +
                 "with its skill's directory segment (`<skill>/<relative path>`); files are grouped by that " +
-                "first segment, which also names the skill when its SKILL.md omits one. Returns one result " +
-                "per skill; one bad skill does not fail the others.")
+                "first segment, which also names the skill when its SKILL.md omits one. Every skill is pushed " +
+                "as a global skill. Returns one result per skill; one bad skill does not fail the others.")
             .WithMetadata(new RequestSizeLimitAttribute(BulkUploadMaxBytes))
             .Produces<SkillBulkPushResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -73,9 +83,10 @@ public static class SkillEndpoints
             .WithName("ListSkills")
             .WithSummary("List my skills")
             .WithDescription(
-                "Lists every skill the caller has pushed, each described by its current version: name, " +
+                "Lists the caller's global skills, each described by its current version: name, project, " +
                 "description, version number, content hash, push time, file count, and total size. Sorted " +
-                "by name. The content hash is SHA-256 over each file's `<path>\\n<UPPERCASE hex sha256>\\n`, " +
+                "by name. `includeProjects=true` adds every project's skills; `projectId` lists only that " +
+                "project's. A global skill has no `projectId`. The content hash is SHA-256 over each file's `<path>\\n<UPPERCASE hex sha256>\\n`, " +
                 "files ordered by path (ordinal), as uppercase hex, so a client can tell whether its local " +
                 "copy matches without downloading it.")
             .Produces<SkillListResponse>(StatusCodes.Status200OK)
@@ -86,7 +97,7 @@ public static class SkillEndpoints
             .WithSummary("Download a skill version")
             .WithDescription(
                 "Returns one version of the caller's skill with every file's bytes (base64 in JSON). " +
-                "Omit `version` for the current version. Paths are relative to the skill root with `/` " +
+                "Omit `projectId` for the global skill of that name, and `version` for the current version. Paths are relative to the skill root with `/` " +
                 "separators and never absolute or containing `..`.")
             .Produces<SkillFilesResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -95,20 +106,8 @@ public static class SkillEndpoints
 
     /// <summary>Lists the caller's skills.</summary>
     private static async Task<IResult> ListAsync(
-        ClaimsPrincipal user, SkillQueryService queries, CancellationToken cancellationToken)
-    {
-        if (!TryGetCreator(user, out var creatorId))
-            return Results.Unauthorized();
-
-        var skills = await queries.ListAsync(creatorId, cancellationToken);
-        return Results.Ok(new SkillListResponse(skills.Select(s => new SkillListItem(
-            s.Name, s.Description, s.Version, s.ContentHash, s.UpdatedAt, s.FileCount, s.TotalBytes)).ToArray()));
-    }
-
-    /// <summary>Returns one version of the caller's skill, files included.</summary>
-    private static async Task<IResult> GetFilesAsync(
-        string name,
-        [FromQuery] int? version,
+        [FromQuery] bool? includeProjects,
+        [FromQuery] Guid? projectId,
         ClaimsPrincipal user,
         SkillQueryService queries,
         CancellationToken cancellationToken)
@@ -116,15 +115,34 @@ public static class SkillEndpoints
         if (!TryGetCreator(user, out var creatorId))
             return Results.Unauthorized();
 
-        var content = await queries.GetContentAsync(creatorId, name, version, cancellationToken);
+        var skills = await queries.ListAsync(creatorId, new SkillListFilter(includeProjects ?? false, projectId), cancellationToken);
+        return Results.Ok(new SkillListResponse(skills.Select(s => new SkillListItem(
+            s.Name, s.Description, s.Version, s.ContentHash, s.UpdatedAt, s.FileCount, s.TotalBytes, s.ProjectId, s.ProjectName)).ToArray()));
+    }
+
+    /// <summary>Returns one version of the caller's skill, files included.</summary>
+    private static async Task<IResult> GetFilesAsync(
+        string name,
+        [FromQuery] int? version,
+        [FromQuery] Guid? projectId,
+        ClaimsPrincipal user,
+        SkillQueryService queries,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCreator(user, out var creatorId))
+            return Results.Unauthorized();
+
+        var content = await queries.GetContentAsync(creatorId, projectId, name, version, cancellationToken);
         if (content is null)
         {
-            var what = version is { } v ? $"version {v} of skill '{name}'" : $"skill '{name}'";
+            var skill = projectId is { } p ? $"skill '{name}' in project {p}" : $"global skill '{name}'";
+            var what = version is { } v ? $"version {v} of {skill}" : skill;
             return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: $"You have no {what}.");
         }
 
         return Results.Ok(new SkillFilesResponse(
             content.Name,
+            content.ProjectId,
             content.Version,
             content.Description,
             content.ContentHash,
@@ -134,11 +152,13 @@ public static class SkillEndpoints
 
     /// <summary>
     /// Pushes one skill. The file parts are relative to the skill root (so <c>SKILL.md</c> is at the
-    /// root); an optional <c>name</c> form field names the skill when its SKILL.md omits a name.
+    /// root); an optional <c>name</c> form field names the skill when its SKILL.md omits a name, and an
+    /// optional <c>project</c> form field (a JSON <see cref="ProjectFolderRequest"/>) makes it a project skill.
     /// </summary>
     private static async Task<IResult> PushOneAsync(
         IFormFileCollection files,
         [FromForm] string? name,
+        [FromForm] string? project,
         ClaimsPrincipal user,
         SkillPushService pushService,
         CancellationToken cancellationToken)
@@ -146,11 +166,15 @@ public static class SkillEndpoints
         if (!TryGetCreator(user, out var creatorId))
             return Results.Unauthorized();
 
+        ProjectFolderRequest? folder = null;
+        if (Blank(project) is { } json && !TryReadProject(json, out folder))
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The project field must be JSON: {\"machineId\": \"<guid>\", \"facts\": {...}}.");
+
         var uploads = await ReadUploadsAsync(files, cancellationToken);
         if (uploads.Count == 0)
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The upload contained no files.");
 
-        var result = await pushService.PushAsync(creatorId, Blank(name), uploads, cancellationToken);
+        var result = await pushService.PushAsync(creatorId, folder, Blank(name), uploads, cancellationToken);
 
         return result.Status switch
         {
@@ -183,7 +207,7 @@ public static class SkillEndpoints
 
         var results = new List<SkillPushResult>(skills.Count);
         foreach (var (skillDirectory, skillFiles) in skills)
-            results.Add(await pushService.PushAsync(creatorId, skillDirectory, skillFiles, cancellationToken));
+            results.Add(await pushService.PushAsync(creatorId, null, skillDirectory, skillFiles, cancellationToken));
 
         return Results.Ok(new SkillBulkPushResponse(results.Select(ToResponse).ToArray()));
     }
@@ -208,6 +232,22 @@ public static class SkillEndpoints
         }
 
         return skills;
+    }
+
+    private static readonly JsonSerializerOptions ProjectJson = new(JsonSerializerDefaults.Web);
+
+    private static bool TryReadProject(string json, out ProjectFolderRequest? project)
+    {
+        try
+        {
+            project = JsonSerializer.Deserialize<ProjectFolderRequest>(json, ProjectJson);
+            return project is { Facts: not null } && project.MachineId != Guid.Empty;
+        }
+        catch (JsonException)
+        {
+            project = null;
+            return false;
+        }
     }
 
     private static bool TryGetCreator(ClaimsPrincipal user, out Guid creatorId) =>
@@ -252,14 +292,18 @@ public static class SkillEndpoints
         SkillId: result.SkillId,
         VersionId: result.VersionId,
         FileCount: result.FileCount,
-        Message: result.Message);
+        Message: result.Message,
+        ProjectId: result.Project?.ProjectId,
+        ProjectName: result.Project?.Name);
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
 
 /// <summary>The JSON shape returned for a single pushed skill (and each entry in a bulk push).</summary>
+/// <remarks><c>ProjectId</c> and <c>ProjectName</c> say which project a project skill was filed under; both are null for a global skill.</remarks>
 public sealed record SkillPushResponse(
-    string Status, string? Name, int? Version, Guid? SkillId, Guid? VersionId, int FileCount, string? Message);
+    string Status, string? Name, int? Version, Guid? SkillId, Guid? VersionId, int FileCount, string? Message,
+    Guid? ProjectId = null, string? ProjectName = null);
 
 /// <summary>The JSON shape returned by the bulk endpoint: one <see cref="SkillPushResponse"/> per skill.</summary>
 public sealed record SkillBulkPushResponse(IReadOnlyList<SkillPushResponse> Skills);
@@ -268,12 +312,15 @@ public sealed record SkillBulkPushResponse(IReadOnlyList<SkillPushResponse> Skil
 public sealed record SkillListResponse(IReadOnlyList<SkillListItem> Skills);
 
 /// <summary>One skill in <see cref="SkillListResponse"/>, described by its current version.</summary>
+/// <remarks><c>ProjectId</c> and <c>ProjectName</c> are null for a global skill.</remarks>
 public sealed record SkillListItem(
-    string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes);
+    string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes,
+    Guid? ProjectId, string? ProjectName);
 
 /// <summary>The JSON shape returned when downloading a skill version.</summary>
+/// <remarks><c>ProjectId</c> is null for a global skill.</remarks>
 public sealed record SkillFilesResponse(
-    string Name, int Version, string? Description, string ContentHash, DateTimeOffset PushedAt, IReadOnlyList<SkillFileResponse> Files);
+    string Name, Guid? ProjectId, int Version, string? Description, string ContentHash, DateTimeOffset PushedAt, IReadOnlyList<SkillFileResponse> Files);
 
 /// <summary>One file in <see cref="SkillFilesResponse"/>; <c>Content</c> is base64 in JSON.</summary>
 public sealed record SkillFileResponse(string Path, long Size, string Sha256, byte[] Content);
