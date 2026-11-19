@@ -4,11 +4,15 @@ using Protostar.Registry.Api.Identity;
 namespace Protostar.Registry.Api.Skills;
 
 /// <summary>
-/// The skill aggregate root: a creator plus a name, owning its version history. Content is never set from
-/// outside; callers push a new version through <see cref="PushVersion"/>, which keeps the invariants
-/// (creator-only writes, contiguous version numbers, current = newest, idempotent re-push) inside the
-/// aggregate. A skill name is unique within a creator.
+/// The skill aggregate root: a creator, an optional project and a name, owning its version history.
 /// </summary>
+/// <remarks>
+/// Content is never set from outside; callers push a new version through <see cref="PushVersion"/>, which
+/// keeps the invariants (creator-only writes, contiguous version numbers, current = newest, idempotent
+/// re-push) inside the aggregate. A skill is identified by (creator, project, name), where no project means
+/// a global skill (ADR 0002), so a global <c>deploy</c> and each project's <c>deploy</c> are separate skills
+/// with separate histories.
+/// </remarks>
 public sealed class Skill : AggregateRoot
 {
     private readonly List<SkillVersion> _versions = [];
@@ -27,7 +31,14 @@ public sealed class Skill : AggregateRoot
 
     public User Creator { get; private set; } = default!;
 
-    /// <summary>The skill name, from its SKILL.md front matter (or supplied at push). Unique per creator.</summary>
+    /// <summary>
+    /// The project this skill belongs to, or <c>null</c> for a global skill (one authored in the harness's own
+    /// config directory rather than inside a project).
+    /// </summary>
+    /// <remarks>Fixed at creation: a project skill and a global skill of the same name are different skills.</remarks>
+    public Guid? ProjectId { get; private set; }
+
+    /// <summary>The skill name, from its SKILL.md front matter (or supplied at push). Unique per creator and project.</summary>
     public string Name { get; private set; } = default!;
 
     public DateTimeOffset CreatedAt { get; private set; }
@@ -49,8 +60,12 @@ public sealed class Skill : AggregateRoot
         !string.IsNullOrWhiteSpace(name) && name.IndexOfAny(['/', '\\']) < 0;
 
     /// <summary>Starts a new skill owned by <paramref name="creatorId"/>. Its first version is added by a push.</summary>
+    /// <param name="creatorId">The user pushing it.</param>
+    /// <param name="name">The skill's name.</param>
+    /// <param name="now">When it is created.</param>
+    /// <param name="projectId">The project it belongs to; <c>null</c> for a global skill.</param>
     /// <exception cref="ArgumentException"><paramref name="name"/> fails <see cref="IsValidName"/>.</exception>
-    public static Skill Create(Guid creatorId, string name, DateTimeOffset now)
+    public static Skill Create(Guid creatorId, string name, DateTimeOffset now, Guid? projectId = null)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("A skill must have a name.", nameof(name));
@@ -61,6 +76,7 @@ public sealed class Skill : AggregateRoot
         {
             Id = Guid.NewGuid(),
             CreatorId = creatorId,
+            ProjectId = projectId,
             Name = name,
             CreatedAt = now,
         };

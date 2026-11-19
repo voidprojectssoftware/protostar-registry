@@ -1,3 +1,5 @@
+using Protostar.Registry.Api.Projects;
+
 namespace Protostar.Registry.Api.Skills;
 
 /// <summary>The outcome of pushing one skill.</summary>
@@ -41,6 +43,9 @@ public enum SkillPushError
 
     /// <summary>The skill's content exceeds the size limits the registry can store.</summary>
     TooLarge,
+
+    /// <summary>The project facts sent with a project skill are malformed.</summary>
+    InvalidProject,
 }
 
 /// <summary>
@@ -55,10 +60,14 @@ public sealed record SkillPushResult
     public Guid? SkillId { get; init; }
     public Guid? VersionId { get; init; }
     public int FileCount { get; init; }
+
+    /// <summary>The project a project skill was filed under; <c>null</c> for a global skill or a failure.</summary>
+    public ProjectResolution? Project { get; init; }
+
     public SkillPushError Error { get; init; } = SkillPushError.None;
     public string? Message { get; init; }
 
-    public static SkillPushResult Created(string name, int version, Guid skillId, Guid versionId, int fileCount) =>
+    public static SkillPushResult Created(string name, int version, Guid skillId, Guid versionId, int fileCount, ProjectResolution? project = null) =>
         new()
         {
             Status = SkillPushStatus.Created,
@@ -67,9 +76,10 @@ public sealed record SkillPushResult
             SkillId = skillId,
             VersionId = versionId,
             FileCount = fileCount,
+            Project = project,
         };
 
-    public static SkillPushResult Unchanged(string name, int version, Guid skillId, Guid versionId, int fileCount) =>
+    public static SkillPushResult Unchanged(string name, int version, Guid skillId, Guid versionId, int fileCount, ProjectResolution? project = null) =>
         new()
         {
             Status = SkillPushStatus.Unchanged,
@@ -78,6 +88,7 @@ public sealed record SkillPushResult
             SkillId = skillId,
             VersionId = versionId,
             FileCount = fileCount,
+            Project = project,
         };
 
     public static SkillPushResult Failed(string? name, SkillPushError error, string message) =>

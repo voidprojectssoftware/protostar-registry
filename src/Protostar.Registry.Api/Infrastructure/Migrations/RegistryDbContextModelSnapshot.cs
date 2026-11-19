@@ -265,7 +265,6 @@ namespace Protostar.Registry.Api.Migrations
             modelBuilder.Entity("Protostar.Registry.Api.Projects.Project", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -292,7 +291,6 @@ namespace Protostar.Registry.Api.Migrations
             modelBuilder.Entity("Protostar.Registry.Api.Projects.ProjectKey", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -556,12 +554,19 @@ namespace Protostar.Registry.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CurrentVersionId");
 
-                    b.HasIndex("CreatorId", "Name")
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("CreatorId", "ProjectId", "Name")
                         .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("CreatorId", "ProjectId", "Name"), false);
 
                     b.ToTable("Skills");
                 });
@@ -737,6 +742,11 @@ namespace Protostar.Registry.Api.Migrations
                         .WithMany()
                         .HasForeignKey("CurrentVersionId")
                         .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("Protostar.Registry.Api.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Creator");
 

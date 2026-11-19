@@ -40,6 +40,40 @@ public sealed class SkillTests
     }
 
     [Fact]
+    public void Create_without_a_project_makes_a_global_skill()
+    {
+        var skill = NewSkill(out _);
+
+        Assert.Null(skill.ProjectId);
+    }
+
+    [Fact]
+    public void Create_with_a_project_makes_a_skill_of_that_project()
+    {
+        var project = Guid.NewGuid();
+
+        var skill = Skill.Create(Guid.NewGuid(), "deploy", Now, project);
+
+        Assert.Equal(project, skill.ProjectId);
+    }
+
+    [Fact]
+    public void A_global_skill_and_a_project_skill_of_the_same_name_keep_separate_histories()
+    {
+        var creator = Guid.NewGuid();
+        var global = Skill.Create(creator, "deploy", Now);
+        var project = Skill.Create(creator, "deploy", Now, Guid.NewGuid());
+
+        Push(global, creator, "global v1");
+        Push(global, creator, "global v2");
+        var projectFirst = Push(project, creator, "project v1");
+
+        Assert.Equal(2, global.CurrentVersion!.VersionNumber);
+        Assert.Equal(1, projectFirst.Version.VersionNumber);
+        Assert.NotEqual(global.Id, project.Id);
+    }
+
+    [Fact]
     public void Create_leaves_current_version_null_before_any_push()
     {
         var skill = NewSkill(out _);

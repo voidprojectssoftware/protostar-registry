@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Protostar.Registry.Api.Projects;
 
 namespace Protostar.Registry.Api.Skills;
 
@@ -10,7 +11,18 @@ public sealed class SkillConfiguration : IEntityTypeConfiguration<Skill>
     {
         builder.HasKey(s => s.Id);
         builder.Property(s => s.Name).IsRequired();
-        builder.HasIndex(s => new { s.CreatorId, s.Name }).IsUnique();
+
+        // One skill per (creator, project, name), where a null project is the creator's global skill. Postgres
+        // treats NULLs as distinct in a unique index by default, which would let two global skills share a
+        // name; NULLS NOT DISTINCT (Postgres 15+) makes the null project one value like any other.
+        builder.HasIndex(s => new { s.CreatorId, s.ProjectId, s.Name }).IsUnique().AreNullsDistinct(false);
+
+        // A project with skills is never deleted from under them: the only automatic project deletion
+        // (forgetting an empty machine-and-folder project) checks for skills first.
+        builder.HasOne<Project>()
+            .WithMany()
+            .HasForeignKey(s => s.ProjectId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(s => s.Creator)
             .WithMany()

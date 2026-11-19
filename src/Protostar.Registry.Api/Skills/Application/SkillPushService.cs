@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Projects;
 
 namespace Protostar.Registry.Api.Skills;
 
@@ -13,15 +14,23 @@ namespace Protostar.Registry.Api.Skills;
 /// A push whose content matches the skill's current version is a no-op. Shared by the single and bulk
 /// endpoints so neither re-implements validation, naming, or version bookkeeping.
 /// </summary>
+/// <remarks>
+/// A push that carries a project folder's facts is a project skill: the facts are resolved to a project by
+/// <see cref="ProjectService"/>, the same matching that files sessions, and the skill is looked up by
+/// (creator, project, name). A push without them is a global skill, which is also what every client from
+/// before project skills sends.
+/// </remarks>
 public sealed class SkillPushService
 {
     private readonly RegistryDbContext _db;
     private readonly IDomainEventDispatcher _dispatcher;
+    private readonly ProjectService _projects;
 
-    public SkillPushService(RegistryDbContext db, IDomainEventDispatcher dispatcher)
+    public SkillPushService(RegistryDbContext db, IDomainEventDispatcher dispatcher, ProjectService projects)
     {
         _db = db;
         _dispatcher = dispatcher;
+        _projects = projects;
     }
 
     /// <summary>
@@ -30,8 +39,13 @@ public sealed class SkillPushService
     /// passes the skill's directory segment). Each call commits independently so one bad skill in a batch
     /// doesn't roll back the others.
     /// </summary>
+    /// <param name="creatorId">The authenticated caller.</param>
+    /// <param name="project">The project folder a project skill lives in; <c>null</c> for a global skill.</param>
+    /// <param name="fallbackName">The name to use when the SKILL.md declares none.</param>
+    /// <param name="uploads">The skill's files, relative to its root.</param>
+    /// <param name="cancellationToken">Cancels the push.</param>
     public async Task<SkillPushResult> PushAsync(
-        Guid creatorId, string? fallbackName, IReadOnlyList<SkillFileUpload> uploads, CancellationToken cancellationToken)
+        Guid creatorId, ProjectFolderRequest? project, string? fallbackName, IReadOnlyList<SkillFileUpload> uploads, CancellationToken cancellationToken)
     {
         if (uploads.Count == 0)
             return SkillPushResult.Failed(fallbackName, SkillPushError.NoFiles, "The skill upload contained no files.");
@@ -59,16 +73,25 @@ public sealed class SkillPushService
         if (!Skill.IsValidName(name))
             return SkillPushResult.Failed(name, SkillPushError.InvalidName, $"The skill name '{name}' cannot contain '/' or '\\'.");
 
+        if (project?.Facts.Problem() is { } badFacts)
+            return SkillPushResult.Failed(name, SkillPushError.InvalidProject, badFacts);
+
         if (await _db.Users.FindAsync([creatorId], cancellationToken) is null)
             return SkillPushResult.Failed(name, SkillPushError.UnknownCreator, "The authenticated user no longer exists.");
 
+        // Resolve first: resolution saves any new project and may reset the change tracker on a race.
+        var resolution = project is null
+            ? null
+            : await _projects.ResolveAsync(creatorId, ProjectIdentity.From(project.MachineId, project.Facts), cancellationToken);
+        var projectId = resolution?.ProjectId;
+
         var skill = await _db.Skills
             .Include(s => s.CurrentVersion)
-            .FirstOrDefaultAsync(s => s.CreatorId == creatorId && s.Name == name, cancellationToken);
+            .FirstOrDefaultAsync(s => s.CreatorId == creatorId && s.ProjectId == projectId && s.Name == name, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var isNewSkill = skill is null;
-        skill ??= Skill.Create(creatorId, name, now);
+        skill ??= Skill.Create(creatorId, name, now, projectId);
 
         SkillVersionPushOutcome outcome;
         try
@@ -85,10 +108,10 @@ public sealed class SkillPushService
         }
 
         if (outcome.IsUnchanged)
-            return SkillPushResult.Unchanged(name, outcome.Version.VersionNumber, skill.Id, outcome.Version.Id, files.Count);
+            return SkillPushResult.Unchanged(name, outcome.Version.VersionNumber, skill.Id, outcome.Version.Id, files.Count, resolution);
 
         await PersistAsync(skill, outcome.Version, isNewSkill, cancellationToken);
-        return SkillPushResult.Created(name, outcome.Version.VersionNumber, skill.Id, outcome.Version.Id, files.Count);
+        return SkillPushResult.Created(name, outcome.Version.VersionNumber, skill.Id, outcome.Version.Id, files.Count, resolution);
     }
 
     /// <summary>
