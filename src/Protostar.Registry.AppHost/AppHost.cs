@@ -13,14 +13,18 @@ var registrydb = postgres.AddDatabase("registrydb");
 // S3-compatible object store for transcript content (gigabytes per user, far too much for database rows).
 // RustFS in dev; the API speaks plain S3, so production can use any S3-compatible store. Credentials are
 // generated once per machine and kept in user-secrets; the data volume keeps content across restarts.
+// The volume is named the way WithDataVolume names the Postgres one (VolumeNameGenerator: a hash of this
+// AppHost's path), so each checkout or worktree pairs its own database with its own store. The orphan sweep
+// relies on that pairing. Before #33 every checkout shared a volume named protostar-registry-objectstore:
+// databases created then reference blobs left in that volume, which this stack no longer mounts.
 var objectStoreAccessKey = builder.AddParameter("ObjectStoreAccessKey", new GenerateParameterDefault { MinLength = 20, Special = false }, persist: true);
 var objectStoreSecretKey = builder.AddParameter("ObjectStoreSecretKey", new GenerateParameterDefault { MinLength = 40, Special = false }, secret: true, persist: true);
 var objectStore = builder.AddContainer("objectstore", "rustfs/rustfs", "1.0.5")
     .WithHttpEndpoint(targetPort: 9000, name: "s3")
     .WithEnvironment("RUSTFS_ACCESS_KEY", objectStoreAccessKey)
     .WithEnvironment("RUSTFS_SECRET_KEY", objectStoreSecretKey)
-    .WithVolume("protostar-registry-objectstore", "/data")
     .WithHttpHealthCheck("/health", endpointName: "s3");
+objectStore.WithVolume(VolumeNameGenerator.Generate(objectStore, "data"), "/data");
 
 builder.AddProject<Projects.Protostar_Registry_Api>("api")
     .WithReference(registrydb)
@@ -29,10 +33,6 @@ builder.AddProject<Projects.Protostar_Registry_Api>("api")
     .WithEnvironment("ObjectStore__ServiceUrl", objectStore.GetEndpoint("s3"))
     .WithEnvironment("ObjectStore__AccessKey", objectStoreAccessKey)
     .WithEnvironment("ObjectStore__SecretKey", objectStoreSecretKey)
-    // The object store volume has a fixed name, so every checkout's stack shares it, while each checkout gets
-    // its own Postgres volume. A blob one checkout's database references looks orphaned to every other, so
-    // the background orphan sweep would delete it: keep the sweep off here. Run one pass on demand instead.
-    .WithEnvironment("ObjectStore__OrphanSweepEnabled", "false")
     // Pin the API to a stable HTTPS port in dev so `--registry` and the GitHub OAuth callback
     // (https://localhost:7443/signin-github) stay the same across runs. Non-proxied = the API binds
     // 7443 directly with the ASP.NET Core dev cert.
