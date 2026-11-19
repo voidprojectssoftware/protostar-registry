@@ -3,6 +3,9 @@ namespace Protostar.Registry.Api.Projects;
 /// <summary>How a directory was matched to its project.</summary>
 public enum ProjectRecognition
 {
+    /// <summary>By a link the user made from this folder.</summary>
+    Link,
+
     /// <summary>By the repo's root commit.</summary>
     RootCommit,
 
@@ -27,7 +30,7 @@ public sealed record ProjectMatch(Guid? ProjectId, ProjectRecognition Recognised
 /// <summary>Decides which project a <see cref="ProjectIdentity"/> belongs to, from the keys already attached.</summary>
 /// <remarks>
 /// <para>
-/// Order, first match wins: the root commit; a recorded root of this checkout that is attached to a project this
+/// Order, first match wins: a link the user made from this machine and folder; the root commit; a recorded root of this checkout that is attached to a project this
 /// same machine-and-folder is already filed under (the first-parent root moved, ADR 0002's trap); for a shallow
 /// clone, a remote (<c>origin</c> first); the machine and folder; otherwise a new project.
 /// </para>
@@ -41,7 +44,7 @@ public static class ProjectMatcher
     /// <summary>Every key that could match <paramref name="identity"/>; look these up, then call <see cref="Match"/>.</summary>
     public static IReadOnlyList<(ProjectKeyKind Kind, string Key)> CandidateKeys(ProjectIdentity identity)
     {
-        var keys = new List<(ProjectKeyKind, string)>();
+        var keys = new List<(ProjectKeyKind, string)> { (ProjectKeyKind.Link, identity.FolderKey) };
         if (identity.RootCommit is { } root)
         {
             keys.Add((ProjectKeyKind.RootCommit, root));
@@ -62,6 +65,9 @@ public static class ProjectMatcher
     public static ProjectMatch Match(ProjectIdentity identity, IReadOnlyCollection<ProjectKey> known, IReadOnlyCollection<Guid> folderProjects)
     {
         Guid? Find(ProjectKeyKind kind, string key) => known.FirstOrDefault(k => k.Kind == kind && k.Key == key)?.ProjectId;
+
+        if (Find(ProjectKeyKind.Link, identity.FolderKey) is { } linked)
+            return new ProjectMatch(linked, ProjectRecognition.Link);
 
         if (identity.RootCommit is { } root)
         {
@@ -95,10 +101,13 @@ public static class ProjectMatcher
     /// <remarks>
     /// A full clone attaches its root commit and its remotes, the remotes so later shallow clones can be matched.
     /// A shallow clone matched by remote attaches nothing. Anything else attaches its folder key. A key already
-    /// attached to another project stays there: first claim wins.
+    /// attached to another project stays there: first claim wins. A linked folder attaches nothing: the link says
+    /// where it belongs, and a linked fork must not hand its root commit to the project it was linked to.
     /// </remarks>
     public static IReadOnlyList<(ProjectKeyKind Kind, string Key)> KeysToAttach(ProjectIdentity identity, ProjectRecognition recognisedBy)
     {
+        if (recognisedBy == ProjectRecognition.Link)
+            return [];
         if (identity.RootCommit is { } root)
             return [(ProjectKeyKind.RootCommit, root), .. identity.Remotes.Select(r => (ProjectKeyKind.Remote, r))];
         return recognisedBy == ProjectRecognition.Remote ? [] : [(ProjectKeyKind.Folder, identity.FolderKey)];

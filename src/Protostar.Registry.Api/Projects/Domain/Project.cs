@@ -13,6 +13,9 @@ public enum ProjectKeyKind
 
     /// <summary>A folder on one machine (<c>&lt;machine id&gt;:&lt;path&gt;</c>), for directories with no better key.</summary>
     Folder,
+
+    /// <summary>A folder on one machine the user linked to this project. Wins over every other key.</summary>
+    Link,
 }
 
 /// <summary>A project: the one identity sessions, memory and search share for "the same project", on every machine.</summary>
@@ -58,7 +61,8 @@ public sealed class Project : AggregateRoot
     /// <summary>Attaches <paramref name="key"/> to this project, unless it already is. Returns whether it was added.</summary>
     /// <remarks>
     /// The caller checks the key is not attached to another of the owner's projects. Attaching a remote raises
-    /// <see cref="ProjectRemoteAttached"/>, because shallow clones that were filed by folder can now be matched.
+    /// <see cref="ProjectRemoteAttached"/>, because shallow clones that were filed by folder can now be matched;
+    /// attaching a link raises <see cref="FolderLinkChanged"/>, because the folder's transcripts move with it.
     /// </remarks>
     public bool Attach(ProjectKeyKind kind, string key, DateTimeOffset now)
     {
@@ -69,11 +73,30 @@ public sealed class Project : AggregateRoot
         UpdatedAt = now;
         if (kind == ProjectKeyKind.Remote)
             RaiseDomainEvent(new ProjectRemoteAttached(OwnerId, Id, key));
+        if (kind == ProjectKeyKind.Link)
+            RaiseDomainEvent(new FolderLinkChanged(OwnerId, key));
         return true;
     }
 
     /// <summary>Whether every key is a folder key: nothing a git repo or the user attached, so an empty one can go.</summary>
     public bool StandsOnlyForFolders => _keys.All(k => k.Kind == ProjectKeyKind.Folder);
+
+    /// <summary>Links the folder with key <paramref name="folderKey"/> to this project. Returns whether it changed.</summary>
+    /// <remarks>The caller removes any link the folder has to another project first (<see cref="Unlink"/>).</remarks>
+    public bool Link(string folderKey, DateTimeOffset now) => Attach(ProjectKeyKind.Link, folderKey, now);
+
+    /// <summary>Removes the link from the folder with key <paramref name="folderKey"/>. Returns whether there was one.</summary>
+    public bool Unlink(string folderKey, DateTimeOffset now)
+    {
+        var removed = _keys.RemoveAll(k => k.Kind == ProjectKeyKind.Link && k.Key == folderKey) > 0;
+        if (removed)
+        {
+            UpdatedAt = now;
+            RaiseDomainEvent(new FolderLinkChanged(OwnerId, folderKey));
+        }
+
+        return removed;
+    }
 
     /// <summary>Changes the display name. Latest seen wins (ADR 0002).</summary>
     public void Rename(string name, DateTimeOffset now)
