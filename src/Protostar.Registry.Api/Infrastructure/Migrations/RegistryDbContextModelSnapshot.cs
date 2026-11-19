@@ -541,6 +541,10 @@ namespace Protostar.Registry.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CarriedByFolderKey")
+                        .HasMaxLength(2100)
+                        .HasColumnType("character varying(2100)");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 

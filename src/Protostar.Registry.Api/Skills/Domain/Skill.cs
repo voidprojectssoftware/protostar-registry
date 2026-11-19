@@ -35,8 +35,19 @@ public sealed class Skill : AggregateRoot
     /// The project this skill belongs to, or <c>null</c> for a global skill (one authored in the harness's own
     /// config directory rather than inside a project).
     /// </summary>
-    /// <remarks>Fixed at creation: a project skill and a global skill of the same name are different skills.</remarks>
+    /// <remarks>
+    /// A project skill and a global skill of the same name are different skills, and a global skill never gets a
+    /// project. A project skill changes project only when the folder it belongs to is linked or unlinked
+    /// (<see cref="FolderSkillMove"/>).
+    /// </remarks>
     public Guid? ProjectId { get; private set; }
+
+    /// <summary>
+    /// The folder (<c>&lt;machine id&gt;:&lt;path&gt;</c>) whose link or unlink carried this skill into a project other
+    /// folders share; <c>null</c> when it is where it was pushed, or in a project that is its folder's alone.
+    /// </summary>
+    /// <remarks>What lets an unlink take the folder's skills back out of a shared project, and only those.</remarks>
+    public string? CarriedByFolderKey { get; private set; }
 
     /// <summary>The skill name, from its SKILL.md front matter (or supplied at push). Unique per creator and project.</summary>
     public string Name { get; private set; } = default!;
@@ -80,6 +91,18 @@ public sealed class Skill : AggregateRoot
             Name = name,
             CreatedAt = now,
         };
+    }
+
+    /// <summary>Moves this project skill, with its whole version history, to <paramref name="projectId"/> because its folder moved there.</summary>
+    /// <param name="projectId">The project the folder now belongs to.</param>
+    /// <param name="carriedByFolderKey">The folder that carried it, when the project is shared; <c>null</c> when the project is the folder's alone.</param>
+    /// <exception cref="InvalidOperationException">This is a global skill, which belongs to no folder.</exception>
+    public void MoveWithFolder(Guid projectId, string? carriedByFolderKey)
+    {
+        if (ProjectId is null)
+            throw new InvalidOperationException("A global skill belongs to no folder, so it never moves with one.");
+        ProjectId = projectId;
+        CarriedByFolderKey = carriedByFolderKey;
     }
 
     /// <summary>

@@ -81,6 +81,15 @@ public sealed class Project : AggregateRoot
     /// <summary>Whether every key is a folder key: nothing a git repo or the user attached, so an empty one can go.</summary>
     public bool StandsOnlyForFolders => _keys.All(k => k.Kind == ProjectKeyKind.Folder);
 
+    /// <summary>Whether every key is the folder <paramref name="folderKey"/>'s own (its machine-and-folder key or its link), so the project is that folder's alone.</summary>
+    /// <remarks>
+    /// True for a folder outside git that was never linked elsewhere, and for the project a fork is given when it
+    /// is kept apart. False as soon as a root commit, a remote or another folder resolves to it. A project with no
+    /// keys left counts as the folder's: nothing else can reach it.
+    /// </remarks>
+    public bool StandsOnlyFor(string folderKey) =>
+        _keys.All(k => k.Key == folderKey && k.Kind is ProjectKeyKind.Folder or ProjectKeyKind.Link);
+
     /// <summary>Links the folder with key <paramref name="folderKey"/> to this project. Returns whether it changed.</summary>
     /// <remarks>The caller removes any link the folder has to another project first (<see cref="Unlink"/>).</remarks>
     public bool Link(string folderKey, DateTimeOffset now) => Attach(ProjectKeyKind.Link, folderKey, now);
