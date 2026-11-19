@@ -135,9 +135,21 @@ builder.Services.AddOptions<ObjectStoreOptions>()
     .Bind(builder.Configuration.GetSection(ObjectStoreOptions.Section))
     .Validate(o => !string.IsNullOrWhiteSpace(o.AccessKey) && !string.IsNullOrWhiteSpace(o.SecretKey),
         "ObjectStore:AccessKey and ObjectStore:SecretKey are required.")
+    .Validate(o => o.OrphanSweepInterval > TimeSpan.Zero && o.OrphanSweepGrace >= TimeSpan.Zero,
+        "ObjectStore:OrphanSweepInterval must be positive and ObjectStore:OrphanSweepGrace must not be negative.")
     .ValidateOnStart();
 builder.Services.AddSingleton<IBlobStore, S3BlobStore>();
 builder.Services.AddScoped<TranscriptService>();
+
+// Chunk blobs orphaned by a lost append race are swept on an interval by every instance (safe to overlap,
+// see OrphanChunkBlobSweep), unless ObjectStore:OrphanSweepEnabled is false. Not in the test host, which has
+// no database or store.
+builder.Services.AddScoped<OrphanChunkBlobSweep>();
+if (!builder.Environment.IsEnvironment("Testing") &&
+    builder.Configuration.GetValue(ObjectStoreOptions.Section + ":" + nameof(ObjectStoreOptions.OrphanSweepEnabled), true))
+{
+    builder.Services.AddHostedService<OrphanChunkBlobSweepService>();
+}
 
 // Enums travel as camelCase strings ("session", not 0) in bodies, and bind from either form in queries.
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -167,6 +179,17 @@ if (builder.Environment.IsDevelopment())
     builder.Services.AddHostedService<ScalarUiClientSeeder>();
 
 var app = builder.Build();
+
+// Operator and test entry point: `dotnet Protostar.Registry.Api.dll sweep-orphan-blobs` runs one sweep pass
+// with this host's configuration and exits, without serving HTTP. Deliberately not an endpoint. It runs even
+// when ObjectStore:OrphanSweepEnabled is false, so only point it at a bucket that belongs to this database.
+if (args is ["sweep-orphan-blobs", ..])
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var result = await scope.ServiceProvider.GetRequiredService<OrphanChunkBlobSweep>().RunAsync(CancellationToken.None);
+    Console.WriteLine($"Listed {result.Listed} chunk blobs, deleted {result.Deleted} orphans.");
+    return;
+}
 
 app.MapDefaultEndpoints();
 

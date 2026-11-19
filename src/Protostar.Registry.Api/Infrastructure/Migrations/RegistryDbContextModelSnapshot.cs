@@ -448,6 +448,9 @@ namespace Protostar.Registry.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BlobKey")
+                        .IsUnique();
+
                     b.HasIndex("TranscriptId", "Revision", "Offset")
                         .IsUnique();
 

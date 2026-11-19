@@ -47,10 +47,13 @@ section, plus Postgres. Where the shared registry runs is undecided (#23).
 - Swapping the store means writing another `IBlobStore`. Nothing else changes.
 - The object is written before the database commit. If two appends to one transcript race, the loser's
   object is left in the store with no chunk row pointing at it. The position is checked first, so only
-  a genuine race does this.
+  a genuine race does this. *Update (#26):* `IBlobStore` gained list and delete, and each API instance
+  now sweeps such orphans once they are older than `ObjectStore:OrphanSweepGrace` (default 24 hours).
+  The sweep assumes the bucket belongs to one database, so the local Aspire stack turns it off: its
+  object store volume is shared by every checkout while each checkout has its own Postgres.
 - **Not decided here, and not implemented:** retention, deletion, lifecycle rules, backup of the object
-  store or of Postgres, and encryption beyond what the chosen store provides. `IBlobStore` has no delete
-  operation. Each of these needs its own decision when it is built.
+  store or of Postgres, and encryption beyond what the chosen store provides. Each of these needs its own
+  decision when it is built.
 
 ## Options considered
 

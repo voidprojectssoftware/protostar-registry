@@ -74,6 +74,10 @@ public sealed class TranscriptChunkConfiguration : IEntityTypeConfiguration<Tran
         // At most one chunk can start at a given offset of a revision.
         builder.HasIndex(c => new { c.TranscriptId, c.Revision, c.Offset }).IsUnique();
 
+        // The orphan sweep asks which of a page of listed keys are referenced. Every key carries a fresh
+        // GUID, so uniqueness holds by construction; the index states it and keeps that lookup cheap.
+        builder.HasIndex(c => c.BlobKey).IsUnique();
+
         builder.HasOne<Transcript>().WithMany().HasForeignKey(c => c.TranscriptId).OnDelete(DeleteBehavior.Cascade);
     }
 }
