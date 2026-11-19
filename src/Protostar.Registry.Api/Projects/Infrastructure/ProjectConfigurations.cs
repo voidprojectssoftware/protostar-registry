@@ -10,6 +10,7 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
     public void Configure(EntityTypeBuilder<Project> builder)
     {
         builder.HasKey(p => p.Id);
+        builder.Property(p => p.Id).ValueGeneratedNever();
         builder.Property(p => p.Name).HasMaxLength(Project.MaxNameLength).IsRequired();
         builder.HasIndex(p => p.OwnerId);
         builder.HasOne<User>().WithMany().HasForeignKey(p => p.OwnerId).OnDelete(DeleteBehavior.Cascade);
@@ -25,6 +26,10 @@ public sealed class ProjectKeyConfiguration : IEntityTypeConfiguration<ProjectKe
     public void Configure(EntityTypeBuilder<ProjectKey> builder)
     {
         builder.HasKey(k => k.Id);
+
+        // The domain assigns the id. Without this, EF takes a key added to an already loaded project for an
+        // existing row and issues an UPDATE that matches nothing.
+        builder.Property(k => k.Id).ValueGeneratedNever();
         builder.Property(k => k.Kind).HasConversion<string>().HasMaxLength(20);
         builder.Property(k => k.Key).HasMaxLength(ProjectKey.MaxLength).IsRequired();
 
