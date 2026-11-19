@@ -31,6 +31,19 @@ public sealed class ProjectTests
     }
 
     [Fact]
+    public void Only_a_project_with_nothing_but_folder_keys_stands_only_for_folders()
+    {
+        var folder = Project.Create(Guid.NewGuid(), "w", Now);
+        folder.Attach(ProjectKeyKind.Folder, "m:/w", Now);
+        var repo = Project.Create(Guid.NewGuid(), "w", Now);
+        repo.Attach(ProjectKeyKind.Folder, "m:/w", Now);
+        repo.Attach(ProjectKeyKind.RootCommit, new string('a', 40), Now);
+
+        Assert.True(folder.StandsOnlyForFolders);
+        Assert.False(repo.StandsOnlyForFolders);
+    }
+
+    [Fact]
     public void A_blank_name_becomes_unnamed_and_a_long_one_is_cut()
     {
         Assert.Equal("unnamed", Project.Create(Guid.NewGuid(), "  ", Now).Name);

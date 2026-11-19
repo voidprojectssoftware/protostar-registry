@@ -46,8 +46,8 @@ public sealed class TranscriptProjects
     }
 
     /// <summary>Re-resolves the owner's filed transcripts that match <paramref name="which"/>, and moves the ones whose project changed.</summary>
-    /// <returns>How many transcripts moved.</returns>
-    public async Task<int> RefileAsync(Guid ownerId, Expression<Func<Transcript, bool>> which, CancellationToken cancellationToken)
+    /// <returns>The projects transcripts moved out of.</returns>
+    public async Task<IReadOnlyCollection<Guid>> RefileAsync(Guid ownerId, Expression<Func<Transcript, bool>> which, CancellationToken cancellationToken)
     {
         var groups = await _db.Transcripts.AsNoTracking()
             .Where(t => t.OwnerId == ownerId && t.ProjectFolder != null)
@@ -56,19 +56,37 @@ public sealed class TranscriptProjects
             .Select(g => g.Key)
             .ToListAsync(cancellationToken);
 
-        var moved = 0;
+        var vacated = new HashSet<Guid>();
         foreach (var group in groups)
         {
             var facts = group.ProjectFactsJson is { } json ? ProjectFacts.FromJson(json) : null;
-            var (resolution, identity) = await ResolveAsync(ownerId, group.MachineId, facts, group.ProjectFolder!, cancellationToken);
-            moved += await _db.Transcripts
+            var (resolution, _) = await ResolveAsync(ownerId, group.MachineId, facts, group.ProjectFolder!, cancellationToken);
+            var moving = _db.Transcripts
                 .Where(t => t.OwnerId == ownerId && t.MachineId == group.MachineId && t.ProjectFolder == group.ProjectFolder &&
                             t.ProjectFactsJson == group.ProjectFactsJson && t.ProjectId != resolution.ProjectId)
-                .Where(which)
-                .ExecuteUpdateAsync(set => set.SetProperty(t => t.ProjectId, resolution.ProjectId), cancellationToken);
+                .Where(which);
+            vacated.UnionWith(await moving.Where(t => t.ProjectId != null).Select(t => t.ProjectId!.Value).Distinct().ToListAsync(cancellationToken));
+            await moving.ExecuteUpdateAsync(set => set.SetProperty(t => t.ProjectId, resolution.ProjectId), cancellationToken);
         }
 
-        return moved;
+        return vacated;
+    }
+
+    /// <summary>Deletes the projects among <paramref name="projectIds"/> that no transcript is filed under and that only ever stood for a folder.</summary>
+    /// <remarks>
+    /// A shallow clone backed up before any full clone gets a machine-and-folder project; once it is refiled to the
+    /// repo's project, that one is left empty and would otherwise linger in listings and suggestions.
+    /// </remarks>
+    public async Task ForgetEmptyFolderProjectsAsync(Guid ownerId, IReadOnlyCollection<Guid> projectIds, CancellationToken cancellationToken)
+    {
+        if (projectIds.Count == 0)
+            return;
+        var used = await _db.Transcripts
+            .Where(t => t.OwnerId == ownerId && t.ProjectId != null && projectIds.Contains(t.ProjectId.Value))
+            .Select(t => t.ProjectId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        await _projects.ForgetFolderProjectsAsync(ownerId, projectIds.Except(used).ToList(), cancellationToken);
     }
 }
 
@@ -83,9 +101,12 @@ public sealed class RefileShallowClones : IDomainEventHandler<ProjectRemoteAttac
 
     public RefileShallowClones(TranscriptProjects transcripts) => _transcripts = transcripts;
 
-    public Task HandleAsync(ProjectRemoteAttached domainEvent, CancellationToken cancellationToken) =>
-        _transcripts.RefileAsync(
+    public async Task HandleAsync(ProjectRemoteAttached domainEvent, CancellationToken cancellationToken)
+    {
+        var vacated = await _transcripts.RefileAsync(
             domainEvent.OwnerId,
             t => t.ProjectId != domainEvent.ProjectId && EF.Functions.JsonContains(t.ProjectFactsJson!, """{"shallow":true}"""),
             cancellationToken);
+        await _transcripts.ForgetEmptyFolderProjectsAsync(domainEvent.OwnerId, vacated, cancellationToken);
+    }
 }

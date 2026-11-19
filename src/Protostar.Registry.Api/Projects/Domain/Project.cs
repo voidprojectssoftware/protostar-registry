@@ -72,6 +72,9 @@ public sealed class Project : AggregateRoot
         return true;
     }
 
+    /// <summary>Whether every key is a folder key: nothing a git repo or the user attached, so an empty one can go.</summary>
+    public bool StandsOnlyForFolders => _keys.All(k => k.Kind == ProjectKeyKind.Folder);
+
     /// <summary>Changes the display name. Latest seen wins (ADR 0002).</summary>
     public void Rename(string name, DateTimeOffset now)
     {
