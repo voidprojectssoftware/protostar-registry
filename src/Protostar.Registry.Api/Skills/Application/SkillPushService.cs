@@ -56,6 +56,8 @@ public sealed class SkillPushService
         var name = Blank(manifest.Name) ?? Blank(fallbackName);
         if (name is null)
             return SkillPushResult.Failed(fallbackName, SkillPushError.MissingName, "The skill declares no name in its SKILL.md and none was supplied.");
+        if (!Skill.IsValidName(name))
+            return SkillPushResult.Failed(name, SkillPushError.InvalidName, $"The skill name '{name}' cannot contain '/' or '\\'.");
 
         if (await _db.Users.FindAsync([creatorId], cancellationToken) is null)
             return SkillPushResult.Failed(name, SkillPushError.UnknownCreator, "The authenticated user no longer exists.");

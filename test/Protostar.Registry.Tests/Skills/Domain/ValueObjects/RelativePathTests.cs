@@ -162,12 +162,62 @@ public sealed class RelativePathTests
         Assert.False(ok);
     }
 
-    [Fact]
-    public void TryCreate_trims_surrounding_whitespace()
+    [Theory]
+    [InlineData(" a/b ")]
+    [InlineData("a/b ")]
+    [InlineData(" a/b")]
+    [InlineData("a /b")]
+    [InlineData("a/ b")]
+    [InlineData("a/b\t")]
+    public void TryCreate_rejects_a_segment_with_leading_or_trailing_whitespace(string raw)
     {
-        RelativePath.TryCreate(" a/b ", out var path);
+        // Trimming would store a path that differs from the file the client hashed, so it is refused instead.
+        var ok = RelativePath.TryCreate(raw, out var path);
 
-        Assert.Equal("a/b", path.Value);
+        Assert.False(ok);
+        Assert.Null(path);
+    }
+
+    [Theory]
+    [InlineData("a b/c d.md")]
+    [InlineData("notes on x.md")]
+    public void TryCreate_accepts_whitespace_inside_a_segment(string raw)
+    {
+        RelativePath.TryCreate(raw, out var path);
+
+        Assert.Equal(raw, path.Value);
+    }
+
+    [Theory]
+    [InlineData(".git/hooks/pre-commit")]
+    [InlineData("scripts/node_modules/x/index.js")]
+    [InlineData("__pycache__/a.pyc")]
+    [InlineData(".venv/bin/python")]
+    [InlineData(".hg/store")]
+    [InlineData(".svn/entries")]
+    [InlineData(".GIT/config")]
+    [InlineData("Node_Modules/x.js")]
+    [InlineData(".git")]
+    public void TryCreate_rejects_a_path_through_a_folder_the_cli_never_reads(string raw)
+    {
+        // The CLI skips these folders when it reads a skill, so a file stored under one would be installed
+        // but never read back, and the two sides could never agree on the skill's content.
+        var ok = RelativePath.TryCreate(raw, out var path);
+
+        Assert.False(ok);
+        Assert.Null(path);
+    }
+
+    [Theory]
+    [InlineData(".gitignore")]
+    [InlineData("docs/.github/x.md")]
+    [InlineData("my.git/x.md")]
+    [InlineData("node_modules.md")]
+    public void TryCreate_accepts_names_that_only_resemble_an_ignored_folder(string raw)
+    {
+        RelativePath.TryCreate(raw, out var path);
+
+        Assert.Equal(raw, path.Value);
     }
 
     [Theory]

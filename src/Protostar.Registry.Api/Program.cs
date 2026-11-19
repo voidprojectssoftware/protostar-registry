@@ -127,6 +127,7 @@ builder.Services.AddAuthorization(options =>
 });
 
 builder.Services.AddScoped<SkillPushService>();
+builder.Services.AddScoped<SkillQueryService>();
 
 // Sessions: transcript bookkeeping in Postgres, transcript bytes in any S3-compatible object store
 // (RustFS under Aspire, which sets ObjectStore__* for the API).
