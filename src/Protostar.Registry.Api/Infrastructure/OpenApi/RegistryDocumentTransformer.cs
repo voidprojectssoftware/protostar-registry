@@ -19,7 +19,7 @@ internal sealed class RegistryDocumentTransformer : IOpenApiDocumentTransformer
             Version = ApiInfo.Version,
             Description =
                 """
-                The registry that protostar clients back up skills to, and later sessions and memory.
+                The registry that protostar clients back up skills and session transcripts to, from every machine.
 
                 ## Authentication
 
@@ -52,6 +52,13 @@ internal sealed class RegistryDocumentTransformer : IOpenApiDocumentTransformer
         {
             new() { Name = ApiTags.Meta, Description = "Service identity and the API compatibility contract." },
             new() { Name = ApiTags.Skills, Description = "Back up skills. Each push stores a new immutable version unless the content matches the current one." },
+            new() { Name = ApiTags.Machines, Description = "The computers and VMs you back up from. Each registers once under an id it generates and keeps." },
+            new()
+            {
+                Name = ApiTags.Transcripts,
+                Description = "Harness transcripts (sessions and their subagents), backed up chunk by chunk as they grow, and the " +
+                    "summaries the registry parses from them.",
+            },
             new()
             {
                 Name = ApiTags.OAuth,
@@ -74,6 +81,8 @@ internal static class ApiTags
 {
     public const string Meta = "Meta";
     public const string Skills = "Skills";
+    public const string Machines = "Machines";
+    public const string Transcripts = "Transcripts";
     public const string OAuth = "OAuth and OpenID Connect";
     public const string SignIn = "Sign-in pages";
 }
