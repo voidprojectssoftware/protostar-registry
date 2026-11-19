@@ -31,7 +31,7 @@ What the code does today:
   chosen by `Region`), `Region`, `AccessKey`, `SecretKey`, `Bucket` (default `protostar-registry`). The
   bucket is created on first use if it is missing.
 - **RustFS under Aspire for development.** The AppHost runs the `rustfs/rustfs:1.0.5` container with a
-  named data volume (`protostar-registry-objectstore`) and passes its endpoint and credentials to the API
+  named data volume (one per checkout since #33, see Consequences) and passes its endpoint and credentials to the API
   as `ObjectStore__*`. The credentials are Aspire parameters generated once per machine and persisted in
   user-secrets. RustFS was chosen because MinIO, the obvious candidate, no longer publishes its images.
 
@@ -51,6 +51,12 @@ section, plus Postgres. Where the shared registry runs is undecided (#23).
   now sweeps such orphans once they are older than `ObjectStore:OrphanSweepGrace` (default 24 hours).
   The sweep assumes the bucket belongs to one database, so the local Aspire stack turns it off: its
   object store volume is shared by every checkout while each checkout has its own Postgres.
+  *Update (#33, 2026-11-19):* the local stack now names the object store volume the way it names the
+  Postgres one (Aspire's `VolumeNameGenerator`, from a hash of the AppHost's path), so each checkout or
+  worktree has its own store paired with its own database, and the sweep is on there too. Dev databases
+  created before this reference blobs in the old shared volume, `protostar-registry-objectstore`, which no
+  stack mounts any more: their transcripts can no longer be read. The old volume is left in place for a
+  developer to remove by hand.
 - **Not decided here, and not implemented:** retention, deletion, lifecycle rules, backup of the object
   store or of Postgres, and encryption beyond what the chosen store provides. Each of these needs its own
   decision when it is built.
