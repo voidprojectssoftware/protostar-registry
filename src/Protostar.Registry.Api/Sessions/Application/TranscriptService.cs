@@ -205,6 +205,47 @@ public sealed class TranscriptService
         await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
     }
 
+    /// <summary>The most transcripts one lookup may name.</summary>
+    /// <remarks>
+    /// 500 keeps the worst case small on every side: a request body of about 120 KB (keys are at most 200
+    /// characters), one indexed query with a 500-element array parameter, and an answer of about 60 KB. A large
+    /// history (1,666 transcripts on the owner's machine) still verifies in four requests.
+    /// </remarks>
+    public const int MaxLookup = 500;
+
+    /// <summary>Where each of <paramref name="transcripts"/> ends in the registry, or that it does not hold it, in request order.</summary>
+    /// <remarks>
+    /// An invalid harness or key cannot name a stored transcript, so it is answered as not known rather than failing
+    /// the whole batch. More than <see cref="MaxLookup"/> transcripts is refused.
+    /// </remarks>
+    public async Task<TranscriptResult<IReadOnlyList<TranscriptLookupResponse>>> LookupAsync(
+        Guid ownerId, IReadOnlyList<TranscriptReference> transcripts, CancellationToken cancellationToken)
+    {
+        if (transcripts.Count > MaxLookup)
+            return TranscriptResult<IReadOnlyList<TranscriptLookupResponse>>.Invalid($"Look up at most {MaxLookup} transcripts per request; this one names {transcripts.Count}.");
+
+        var keys = new List<TranscriptKey>();
+        foreach (var requested in transcripts)
+        {
+            if (HarnessId.TryCreate(requested.Harness, out _) && TranscriptKey.TryCreate(requested.Key, out var key))
+                keys.Add(key);
+        }
+
+        var stored = keys.Count == 0
+            ? []
+            : await _db.Transcripts.AsNoTracking()
+                .Where(t => t.OwnerId == ownerId && keys.Contains(t.Key))
+                .Select(t => new { t.Harness, t.Key, t.Revision, t.Length })
+                .ToListAsync(cancellationToken);
+        var positions = stored.ToDictionary(t => (t.Harness.Value, t.Key.Value), t => (t.Revision, t.Length));
+
+        return TranscriptResult<IReadOnlyList<TranscriptLookupResponse>>.Ok(transcripts
+            .Select(t => positions.TryGetValue((t.Harness, t.Key), out var at)
+                ? new TranscriptLookupResponse(t.Harness, t.Key, true, at.Revision, at.Length)
+                : new TranscriptLookupResponse(t.Harness, t.Key, false, null, null))
+            .ToList());
+    }
+
     /// <summary>Lists transcripts, most recently active first.</summary>
     public async Task<IReadOnlyList<TranscriptView>> ListAsync(Guid ownerId, TranscriptQuery query, CancellationToken cancellationToken)
     {

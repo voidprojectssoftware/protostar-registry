@@ -33,6 +33,15 @@ public static class SessionEndpoints
         `PUT /v1/machines/{machineId}` and retry.
         """;
 
+    private static readonly string LookupDescription =
+        $"""
+        Answers, for up to {TranscriptService.MaxLookup} transcripts at once, whether the registry holds each one and
+        where its stored content ends, so a client can check its backups without one request per transcript.
+
+        The answer has one entry per requested transcript, in request order. A transcript the caller does not own, or
+        whose harness or key is not valid, is reported as not `known`, the same as one that was never registered.
+        """;
+
     private const string UnknownMachineResponse =
         $"Invalid request. When the machine is not registered, the problem `type` is `{SessionProblemTypes.UnknownMachine}`; register it with `PUT /v1/machines/{{machineId}}` and retry.";
 
@@ -97,6 +106,15 @@ public static class SessionEndpoints
             .Produces<TranscriptDetailResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound)
             .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
+
+        v1.MapPost("/transcripts/lookup", LookupAsync)
+            .WithTags(ApiTags.Transcripts)
+            .WithName("LookUpTranscripts")
+            .WithSummary("Look up many transcripts' positions at once")
+            .WithDescription(LookupDescription)
+            .Produces<TranscriptLookupResponse[]>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .WithResponseDescription(StatusCodes.Status400BadRequest, $"More than {TranscriptService.MaxLookup} transcripts in one request.");
 
         v1.MapGet("/transcripts", ListAsync)
             .WithTags(ApiTags.Transcripts)
@@ -192,6 +210,16 @@ public static class SessionEndpoints
         return Results.Ok(TranscriptDetailResponse.From(view, subagents));
     }
 
+    private static async Task<IResult> LookupAsync(
+        TranscriptLookupRequest request, ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var result = await service.LookupAsync(ownerId, request.Transcripts ?? [], cancellationToken);
+        return result.Failure == TranscriptFailure.None ? Results.Ok(result.Value) : Failure(result);
+    }
+
     private static async Task<IResult> ListAsync(
         ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken,
         [Description("`session` (default) or `subagent`.")] TranscriptKind kind = TranscriptKind.Session,
@@ -270,6 +298,23 @@ public sealed record TranscriptPositionResponse(string Harness, string Key, int 
 {
     internal static TranscriptPositionResponse From(Transcript t) => new(t.Harness.Value, t.Key.Value, t.Revision, t.Length, t.ChunkCount);
 }
+
+/// <summary>The transcripts to look up.</summary>
+/// <param name="Transcripts">Each one's harness and key; at most <see cref="TranscriptService.MaxLookup"/>.</param>
+public sealed record TranscriptLookupRequest(IReadOnlyList<TranscriptReference>? Transcripts);
+
+/// <summary>A transcript named by its harness and key.</summary>
+/// <param name="Harness">The harness id, for example <c>claude-code</c>.</param>
+/// <param name="Key">The transcript's key within the harness.</param>
+public sealed record TranscriptReference(string Harness, string Key);
+
+/// <summary>What the registry holds of one looked-up transcript.</summary>
+/// <param name="Harness">The harness id, as requested.</param>
+/// <param name="Key">The key, as requested.</param>
+/// <param name="Known">Whether the registry holds the transcript; when false, <paramref name="Revision"/> and <paramref name="Length"/> are <c>null</c>.</param>
+/// <param name="Revision">The current revision.</param>
+/// <param name="Length">Bytes stored for the current revision; the next chunk's offset.</param>
+public sealed record TranscriptLookupResponse(string Harness, string Key, bool Known, int? Revision, long? Length);
 
 /// <summary>A <c>409</c> problem for a chunk that was not at the current position.</summary>
 /// <param name="Title">What went wrong.</param>
