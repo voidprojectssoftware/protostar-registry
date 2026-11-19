@@ -1,6 +1,7 @@
 # 0002. Project identity across machines
 
-- **Status:** proposed (spike voidprojectssoftware/protostar-cli#44; two owner decisions listed below)
+- **Status:** accepted 2026-11-19 (spike voidprojectssoftware/protostar-cli#44; owner decisions answered in
+  voidprojectssoftware/protostar-registry#29)
 - **Date:** 2026-11-19
 - **Issue:** voidprojectssoftware/protostar-cli#44. Informs protostar-cli#18 and #46 (6.2), and the skill
   collision found in protostar-cli PR #49.
@@ -141,13 +142,18 @@ directory, ask the registry (or a cached mapping) for the project id.
 
 ## Owner decisions
 
-1. **Is a fork the same project as its upstream?** Recommendation: yes, by default. The code is the same,
+Both answered by the owner on 2026-11-19 ("agreed.", accepting both recommendations below; recorded in
+voidprojectssoftware/protostar-registry#29).
+
+1. **Is a fork the same project as its upstream?** Decided: yes, by default. The code is the same,
    so memory about it applies to both; the root commit cannot tell them apart, and only the remote URL
    (rejected above as unstable) could. A hard fork that becomes a separate product can be split later.
 2. **May the registry link non-git folders automatically?** For example the Windows and Linux
-   `protostar` workspace folders, which share a last segment. Recommendation: no automatic link; suggest
+   `protostar` workspace folders, which share a last segment. Decided: no automatic link; suggest
    it ("`protostar` on Windows looks like `protostar` on Linux, link them?") and let the user confirm,
    because a wrong merge mixes memory between unrelated folders.
+3. **Added by the owner:** a user can link a folder to a project themselves, and can see which project
+   Protostar perceives the current directory to be in (protostar-cli#57).
 
 ## Assumptions
 
