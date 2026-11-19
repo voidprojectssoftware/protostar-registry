@@ -123,7 +123,7 @@ public sealed class TranscriptService
             return TranscriptResult<Transcript>.Invalid("The chunk does not match its X-Content-SHA256 header; it was corrupted in transit.");
         }
 
-        var blobKey = $"transcripts/{ownerId:N}/{transcript.Id:N}/r{revision}/{offset:D16}-{Guid.NewGuid():N}.jsonl.gz";
+        var blobKey = $"{TranscriptChunk.BlobKeyPrefix}{ownerId:N}/{transcript.Id:N}/r{revision}/{offset:D16}-{Guid.NewGuid():N}.jsonl.gz";
         var now = DateTimeOffset.UtcNow;
         var outcome = transcript.Append(revision, offset, raw, blobKey, stored.Length, machineId, TranscriptParsers.For(harness), now);
         if (outcome.Expected is not null)

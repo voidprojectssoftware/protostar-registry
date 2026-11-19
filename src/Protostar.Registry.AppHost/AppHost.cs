@@ -29,6 +29,10 @@ builder.AddProject<Projects.Protostar_Registry_Api>("api")
     .WithEnvironment("ObjectStore__ServiceUrl", objectStore.GetEndpoint("s3"))
     .WithEnvironment("ObjectStore__AccessKey", objectStoreAccessKey)
     .WithEnvironment("ObjectStore__SecretKey", objectStoreSecretKey)
+    // The object store volume has a fixed name, so every checkout's stack shares it, while each checkout gets
+    // its own Postgres volume. A blob one checkout's database references looks orphaned to every other, so
+    // the background orphan sweep would delete it: keep the sweep off here. Run one pass on demand instead.
+    .WithEnvironment("ObjectStore__OrphanSweepEnabled", "false")
     // Pin the API to a stable HTTPS port in dev so `--registry` and the GitHub OAuth callback
     // (https://localhost:7443/signin-github) stay the same across runs. Non-proxied = the API binds
     // 7443 directly with the ASP.NET Core dev cert.

@@ -175,6 +175,9 @@ public sealed record TranscriptAppendOutcome
 /// <summary>One stored piece of a transcript: a byte range of one revision, whose bytes are in blob storage.</summary>
 public sealed class TranscriptChunk
 {
+    /// <summary>Every chunk blob's key starts with this; nothing else in the store does.</summary>
+    public const string BlobKeyPrefix = "transcripts/";
+
     private TranscriptChunk()
     {
     }
