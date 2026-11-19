@@ -25,3 +25,6 @@ appsettings.*.local.json
 # OS
 .DS_Store
 Thumbs.db
+
+# PR and comment bodies written by agents (docs/process/working-an-issue.md)
+.bodies/

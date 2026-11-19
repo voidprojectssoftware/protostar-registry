@@ -1,0 +1,22 @@
+name: provenance
+# Detection, not prevention: on every push to main, fail loudly when a commit arrived outside a
+# merged pull request, or a pull request was merged without scripts/merge-pr.mjs (no Landed-by
+# trailer). The ruleset lets org admins bypass it, so this is the layer that notices.
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - run: node scripts/check-main-provenance.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVENANCE_BEFORE: ${{ github.event.before }}
+          PROVENANCE_AFTER: ${{ github.event.after }}
