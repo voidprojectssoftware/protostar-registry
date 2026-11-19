@@ -2,7 +2,9 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Projects;
 
 namespace Protostar.Registry.Api.Sessions;
 
@@ -16,11 +18,15 @@ public sealed class TranscriptService
 {
     private readonly RegistryDbContext _db;
     private readonly IBlobStore _blobs;
+    private readonly TranscriptProjects _projects;
+    private readonly IDomainEventDispatcher _events;
 
-    public TranscriptService(RegistryDbContext db, IBlobStore blobs)
+    public TranscriptService(RegistryDbContext db, IBlobStore blobs, TranscriptProjects projects, IDomainEventDispatcher events)
     {
         _db = db;
         _blobs = blobs;
+        _projects = projects;
+        _events = events;
     }
 
     /// <summary>Registers <paramref name="machineId"/>, or refreshes its details. Returns the machine and whether it was new.</summary>
@@ -44,7 +50,12 @@ public sealed class TranscriptService
         return (machine, created);
     }
 
-    /// <summary>Registers a transcript, or refreshes where it lives. Returns its current position.</summary>
+    /// <summary>Registers a transcript, or refreshes where it lives, and files it under its project. Returns its current position.</summary>
+    /// <remarks>
+    /// With <see cref="RegisterTranscriptRequest.Project"/> facts the transcript is filed under the project they
+    /// resolve to, replacing any earlier filing. Without them, a transcript whose working directory is already
+    /// known from its lines but that was never filed gets a machine-and-folder project.
+    /// </remarks>
     public async Task<TranscriptResult<Transcript>> RegisterTranscriptAsync(
         Guid ownerId, string harnessRaw, string keyRaw, RegisterTranscriptRequest request, CancellationToken cancellationToken)
     {
@@ -55,8 +66,16 @@ public sealed class TranscriptService
         if (request.Kind == TranscriptKind.Subagent && !TranscriptKey.TryCreate(request.ParentKey, out parentKey))
             return TranscriptResult<Transcript>.Invalid("A subagent transcript needs a valid parentKey.");
 
+        if (request.Project?.Problem() is { } badFacts)
+            return TranscriptResult<Transcript>.Invalid(badFacts);
+
         if (!await _db.Machines.AnyAsync(m => m.OwnerId == ownerId && m.Id == request.MachineId, cancellationToken))
             return TranscriptResult<Transcript>.Invalid($"Machine {request.MachineId} is not registered. Register it with PUT /v1/machines/{{machineId}} first.");
+
+        // Resolve first: resolution saves any new project and may reset the change tracker on a race.
+        var filing = request.Project is { } facts
+            ? await _projects.ResolveAsync(ownerId, request.MachineId, facts, facts.WorkingDirectory, cancellationToken)
+            : ((ProjectResolution Resolution, ProjectIdentity Identity)?)null;
 
         var now = DateTimeOffset.UtcNow;
         var transcript = await FindAsync(ownerId, harness, key, cancellationToken);
@@ -74,7 +93,12 @@ public sealed class TranscriptService
             transcript.Describe(request.MachineId, request.SourcePath, request.Metadata?.GetRawText(), now);
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        if (filing is { } filed)
+            transcript.FileUnder(filed.Resolution.ProjectId, filed.Identity, request.Project!.ToJson(), now);
+
+        await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
+        if (filing is null)
+            await FileByWorkingDirectoryAsync(transcript, cancellationToken);
         return TranscriptResult<Transcript>.Ok(transcript);
     }
 
@@ -147,7 +171,22 @@ public sealed class TranscriptService
             return TranscriptResult<Transcript>.Mismatch(current!);
         }
 
+        await FileByWorkingDirectoryAsync(transcript, cancellationToken);
         return TranscriptResult<Transcript>.Ok(transcript);
+    }
+
+    // A transcript the client sent no facts for is filed by the working directory its lines recorded, once
+    // they have recorded one, as a machine-and-folder project. Runs after the caller's save, because resolving
+    // may save a new project of its own.
+    private async Task FileByWorkingDirectoryAsync(Transcript transcript, CancellationToken cancellationToken)
+    {
+        if (transcript.ProjectId is not null || transcript.Summary.WorkingDirectory is not { } directory)
+            return;
+
+        var (resolution, identity) = await _projects.ResolveAsync(transcript.OwnerId, transcript.MachineId, null, directory, cancellationToken);
+        var tracked = await FindAsync(transcript.OwnerId, transcript.Harness, transcript.Key, cancellationToken);
+        tracked!.FileUnder(resolution.ProjectId, identity, null, DateTimeOffset.UtcNow);
+        await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
     }
 
     /// <summary>Lists transcripts, most recently active first.</summary>
@@ -159,8 +198,15 @@ public sealed class TranscriptService
             transcripts = transcripts.Where(t => t.Harness == harness);
         if (query.MachineId is { } machineId)
             transcripts = transcripts.Where(t => t.MachineId == machineId);
-        if (!string.IsNullOrWhiteSpace(query.Project))
-            transcripts = transcripts.Where(t => EF.Functions.ILike(t.Summary.WorkingDirectory!, "%" + query.Project + "%"));
+        if (Guid.TryParse(query.Project, out var projectId))
+        {
+            transcripts = transcripts.Where(t => t.ProjectId == projectId);
+        }
+        else if (!string.IsNullOrWhiteSpace(query.Project))
+        {
+            var named = _db.Projects.Where(p => p.OwnerId == ownerId && EF.Functions.ILike(p.Name, "%" + query.Project + "%")).Select(p => p.Id);
+            transcripts = transcripts.Where(t => t.ProjectId != null && named.Contains(t.ProjectId.Value));
+        }
         if (query.Since is { } since)
             transcripts = transcripts.Where(t => t.Summary.LastActivityAt >= since);
         if (query.Before is { } before)
@@ -247,9 +293,15 @@ public sealed class TranscriptService
             .Select(g => new { g.Key.Harness, g.Key.ParentKey, Count = g.Count() })
             .ToListAsync(cancellationToken);
 
+        var projectIds = transcripts.Where(t => t.ProjectId != null).Select(t => t.ProjectId!.Value).Distinct().ToList();
+        var projectNames = await _db.Projects.AsNoTracking()
+            .Where(p => p.OwnerId == ownerId && projectIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.Name, cancellationToken);
+
         return transcripts.Select(t => new TranscriptView(
             t,
             machines.GetValueOrDefault(t.MachineId),
+            t.ProjectId is { } project ? projectNames.GetValueOrDefault(project) : null,
             subagentCounts.FirstOrDefault(c => c.Harness == t.Harness && c.ParentKey == t.Key)?.Count ?? 0)).ToList();
     }
 
@@ -314,15 +366,20 @@ public sealed class TranscriptService
 /// <param name="MachineId">The registered machine the file lives on.</param>
 /// <param name="SourcePath">The file's path on that machine.</param>
 /// <param name="Metadata">Harness-specific metadata kept beside the transcript, such as a Claude Code subagent's <c>.meta.json</c>.</param>
+/// <param name="Project">What the client found out about the session's working directory, to file it under its project; optional.</param>
 public sealed record RegisterTranscriptRequest(
-    TranscriptKind Kind, string? ParentKey, Guid MachineId, string SourcePath, System.Text.Json.JsonElement? Metadata);
+    TranscriptKind Kind, string? ParentKey, Guid MachineId, string SourcePath, System.Text.Json.JsonElement? Metadata, ProjectFacts? Project = null);
 
 /// <summary>Filters for listing transcripts.</summary>
 public sealed record TranscriptQuery(
     TranscriptKind Kind, string? Harness, Guid? MachineId, string? Project, DateTimeOffset? Since, DateTimeOffset? Before, int Limit);
 
 /// <summary>A transcript joined with what listings show beside it.</summary>
-public sealed record TranscriptView(Transcript Transcript, Machine? Machine, int SubagentCount);
+/// <param name="Transcript">The transcript.</param>
+/// <param name="Machine">The machine it came from, if still registered.</param>
+/// <param name="ProjectName">Its project's display name, or <c>null</c> while it is not filed under one.</param>
+/// <param name="SubagentCount">Subagent transcripts of a session.</param>
+public sealed record TranscriptView(Transcript Transcript, Machine? Machine, string? ProjectName, int SubagentCount);
 
 /// <summary>Why a transcript operation did not succeed.</summary>
 public enum TranscriptFailure

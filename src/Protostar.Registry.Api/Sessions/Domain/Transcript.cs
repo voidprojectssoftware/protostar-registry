@@ -1,4 +1,5 @@
 using Protostar.Registry.Api.Common;
+using Protostar.Registry.Api.Projects;
 
 namespace Protostar.Registry.Api.Sessions;
 
@@ -66,6 +67,20 @@ public sealed class Transcript : AggregateRoot
 
     public TranscriptSummary Summary { get; private set; } = TranscriptSummary.Empty;
 
+    /// <summary>The project the session's working directory belongs to; <c>null</c> until that directory is known.</summary>
+    public Guid? ProjectId { get; private set; }
+
+    /// <summary>The folder the transcript was filed by on its machine: the main worktree for git, else the working directory.</summary>
+    /// <remarks>Links and recomputation find a folder's transcripts by this and <see cref="MachineId"/>.</remarks>
+    public string? ProjectFolder { get; private set; }
+
+    /// <summary>The working directory's path within its repo, or <c>null</c> at the top or outside git.</summary>
+    public string? ProjectSubpath { get; private set; }
+
+    /// <summary>The client's project facts for the working directory, as JSON; <c>null</c> when it sent none.</summary>
+    /// <remarks>Kept as sent so the project can be recomputed from them without the client.</remarks>
+    public string? ProjectFactsJson { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -101,6 +116,20 @@ public sealed class Transcript : AggregateRoot
         MachineId = machineId;
         SourcePath = sourcePath;
         MetadataJson = metadataJson ?? MetadataJson;
+        UpdatedAt = now;
+    }
+
+    /// <summary>Files the transcript under <paramref name="projectId"/>, resolved from <paramref name="identity"/>.</summary>
+    /// <param name="projectId">The resolved project.</param>
+    /// <param name="identity">The working directory's identity.</param>
+    /// <param name="factsJson">The facts the identity came from, or <c>null</c> to keep the ones stored (none, for a path-only identity).</param>
+    /// <param name="now">The time of the change.</param>
+    public void FileUnder(Guid projectId, ProjectIdentity identity, string? factsJson, DateTimeOffset now)
+    {
+        ProjectId = projectId;
+        ProjectFolder = identity.Folder;
+        ProjectSubpath = identity.Subpath;
+        ProjectFactsJson = factsJson ?? ProjectFactsJson;
         UpdatedAt = now;
     }
 

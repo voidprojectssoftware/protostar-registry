@@ -262,6 +262,68 @@ namespace Protostar.Registry.Api.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Projects.Project", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId");
+
+                    b.ToTable("Projects");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Projects.ProjectKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(2100)
+                        .HasColumnType("character varying(2100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("OwnerId", "Kind", "Key")
+                        .IsUnique();
+
+                    b.ToTable("ProjectKeys");
+                });
+
             modelBuilder.Entity("Protostar.Registry.Api.Sessions.Machine", b =>
                 {
                     b.Property<Guid>("OwnerId")
@@ -334,6 +396,20 @@ namespace Protostar.Registry.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("ProjectFactsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("ProjectFolder")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProjectSubpath")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<int>("Revision")
                         .HasColumnType("integer");
 
@@ -396,14 +472,18 @@ namespace Protostar.Registry.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ProjectId");
+
                     b.HasIndex("OwnerId", "Kind");
 
-                    b.HasIndex("OwnerId", "MachineId");
+                    b.HasIndex("OwnerId", "ProjectId");
 
                     b.HasIndex("OwnerId", "Harness", "Key")
                         .IsUnique();
 
                     b.HasIndex("OwnerId", "Harness", "ParentKey");
+
+                    b.HasIndex("OwnerId", "MachineId", "ProjectFolder");
 
                     b.ToTable("Transcripts");
                 });
@@ -589,6 +669,24 @@ namespace Protostar.Registry.Api.Migrations
                     b.Navigation("Authorization");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Projects.Project", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Projects.ProjectKey", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Projects.Project", null)
+                        .WithMany("Keys")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Protostar.Registry.Api.Sessions.Machine", b =>
                 {
                     b.HasOne("Protostar.Registry.Api.Identity.User", null)
@@ -605,6 +703,11 @@ namespace Protostar.Registry.Api.Migrations
                         .HasForeignKey("OwnerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Protostar.Registry.Api.Sessions.Machine", null)
                         .WithMany()
@@ -676,6 +779,11 @@ namespace Protostar.Registry.Api.Migrations
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
                 {
                     b.Navigation("Tokens");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Projects.Project", b =>
+                {
+                    b.Navigation("Keys");
                 });
 
             modelBuilder.Entity("Protostar.Registry.Api.Skills.Skill", b =>
