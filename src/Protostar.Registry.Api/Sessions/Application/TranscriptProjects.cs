@@ -36,12 +36,7 @@ public sealed class TranscriptProjects
         Guid ownerId, Guid machineId, ProjectFacts? facts, string workingDirectory, CancellationToken cancellationToken)
     {
         var identity = facts is null ? ProjectIdentity.FromFolder(machineId, workingDirectory) : ProjectIdentity.From(machineId, facts);
-        var folderProjects = await _db.Transcripts.AsNoTracking()
-            .Where(t => t.OwnerId == ownerId && t.MachineId == machineId && t.ProjectFolder == identity.Folder && t.ProjectId != null)
-            .Select(t => t.ProjectId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-        var resolution = await _projects.ResolveAsync(ownerId, identity, folderProjects, cancellationToken);
+        var resolution = await _projects.ResolveAsync(ownerId, identity, cancellationToken);
         return (resolution, identity);
     }
 
@@ -108,5 +103,39 @@ public sealed class RefileShallowClones : IDomainEventHandler<ProjectRemoteAttac
             t => t.ProjectId != domainEvent.ProjectId && EF.Functions.JsonContains(t.ProjectFactsJson!, """{"shallow":true}"""),
             cancellationToken);
         await _transcripts.ForgetEmptyFolderProjectsAsync(domainEvent.OwnerId, vacated, cancellationToken);
+    }
+}
+
+/// <summary>Moves a folder's transcripts when the user links or unlinks it (protostar-cli#57).</summary>
+public sealed class RefileLinkedFolder : IDomainEventHandler<FolderLinkChanged>
+{
+    private readonly TranscriptProjects _transcripts;
+
+    public RefileLinkedFolder(TranscriptProjects transcripts) => _transcripts = transcripts;
+
+    public Task HandleAsync(FolderLinkChanged domainEvent, CancellationToken cancellationToken)
+    {
+        if (!ProjectIdentity.TryParseFolderKey(domainEvent.FolderKey, out var machineId, out var folder))
+            return Task.CompletedTask;
+        return _transcripts.RefileAsync(domainEvent.OwnerId, t => t.MachineId == machineId && t.ProjectFolder == folder, cancellationToken);
+    }
+}
+
+/// <summary>Production <see cref="IFolderFilings"/>: reads which projects a folder's transcripts are filed under.</summary>
+public sealed class TranscriptFolderFilings : IFolderFilings
+{
+    private readonly RegistryDbContext _db;
+
+    public TranscriptFolderFilings(RegistryDbContext db) => _db = db;
+
+    public async Task<IReadOnlyCollection<Guid>> ProjectsOfFolderAsync(Guid ownerId, ProjectIdentity identity, CancellationToken cancellationToken)
+    {
+        if (!ProjectIdentity.TryParseFolderKey(identity.FolderKey, out var machineId, out var folder))
+            return [];
+        return await _db.Transcripts.AsNoTracking()
+            .Where(t => t.OwnerId == ownerId && t.MachineId == machineId && t.ProjectFolder == folder && t.ProjectId != null)
+            .Select(t => t.ProjectId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
     }
 }
