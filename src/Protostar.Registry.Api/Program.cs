@@ -10,6 +10,7 @@ using Protostar.Registry.Api;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Projects;
 using Protostar.Registry.Api.Sessions;
 using Protostar.Registry.Api.Skills;
 using Scalar.AspNetCore;
@@ -150,6 +151,11 @@ if (!builder.Environment.IsEnvironment("Testing") &&
 {
     builder.Services.AddHostedService<OrphanChunkBlobSweepService>();
 }
+
+// Projects: the identity sessions (and later memory and search) share across machines (ADR 0002).
+builder.Services.AddScoped<ProjectService>();
+builder.Services.AddScoped<TranscriptProjects>();
+builder.Services.AddScoped<IDomainEventHandler<ProjectRemoteAttached>, RefileShallowClones>();
 
 // Enums travel as camelCase strings ("session", not 0) in bodies, and bind from either form in queries.
 builder.Services.ConfigureHttpJsonOptions(options =>

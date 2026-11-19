@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Protostar.Registry.Api.Identity;
+using Protostar.Registry.Api.Projects;
 
 namespace Protostar.Registry.Api.Sessions;
 
@@ -39,12 +40,18 @@ public sealed class TranscriptConfiguration : IEntityTypeConfiguration<Transcrip
         builder.Property(t => t.Kind).HasConversion<string>().HasMaxLength(20);
         builder.Property(t => t.SourcePath).HasMaxLength(2000).IsRequired();
         builder.Property(t => t.MetadataJson).HasColumnType("jsonb");
+        builder.Property(t => t.ProjectFolder).HasMaxLength(2000);
+        builder.Property(t => t.ProjectSubpath).HasMaxLength(2000);
+        builder.Property(t => t.ProjectFactsJson).HasColumnType("jsonb");
 
         builder.HasIndex(t => new { t.OwnerId, t.Harness, t.Key }).IsUnique();
         builder.HasIndex(t => new { t.OwnerId, t.Harness, t.ParentKey });
         builder.HasIndex(t => new { t.OwnerId, t.Kind });
+        builder.HasIndex(t => new { t.OwnerId, t.ProjectId });
+        builder.HasIndex(t => new { t.OwnerId, t.MachineId, t.ProjectFolder });
 
         builder.HasOne<User>().WithMany().HasForeignKey(t => t.OwnerId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Project>().WithMany().HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Machine>().WithMany().HasForeignKey(t => new { t.OwnerId, t.MachineId }).OnDelete(DeleteBehavior.Restrict);
 
         builder.ComplexProperty(t => t.Summary, summary =>

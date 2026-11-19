@@ -181,7 +181,7 @@ public static class SessionEndpoints
         [Description("`session` (default) or `subagent`.")] TranscriptKind kind = TranscriptKind.Session,
         [Description("Only this harness, for example `claude-code`.")] string? harness = null,
         [Description("Only transcripts from this machine.")] Guid? machine = null,
-        [Description("Only sessions whose working directory contains this text, for example `protostar`.")] string? project = null,
+        [Description("Only sessions in this project: its id, or text its name contains, for example `protostar`.")] string? project = null,
         [Description("Only transcripts active at or after this time.")] DateTimeOffset? since = null,
         [Description("Only transcripts last active before this time; pass the previous page's last `lastActivityAt`.")] DateTimeOffset? before = null,
         [Description("Page size, 1 to 200.")] int limit = 50)
@@ -254,7 +254,9 @@ public sealed record TranscriptPositionProblem(string Title, int Status, int Rev
 /// <param name="ParentKey">For a subagent, the session it ran in.</param>
 /// <param name="Title">The harness's title for the session, or the first prompt when it has none.</param>
 /// <param name="FirstPrompt">The first thing the user asked, shortened.</param>
-/// <param name="Project">The last segment of the working directory; a display name until projects have a stable identity.</param>
+/// <param name="ProjectId">The project the session belongs to, the same on every machine; <c>null</c> until its working directory is known.</param>
+/// <param name="Project">The project's display name: its normalised remote, or a folder name.</param>
+/// <param name="ProjectSubpath">The working directory's path within its repo, when it is a subfolder.</param>
 /// <param name="WorkingDirectory">The working directory on the machine it ran on.</param>
 /// <param name="GitBranch">The branch it was on.</param>
 /// <param name="HarnessVersion">The harness version that last wrote to it.</param>
@@ -270,8 +272,8 @@ public sealed record TranscriptPositionProblem(string Title, int Status, int Rev
 /// <param name="Revision">The current revision.</param>
 /// <param name="SubagentCount">Subagent transcripts backed up for this session.</param>
 public sealed record TranscriptResponse(
-    string Harness, string Key, TranscriptKind Kind, string? ParentKey, string? Title, string? FirstPrompt, string? Project,
-    string? WorkingDirectory, string? GitBranch, string? HarnessVersion, Guid MachineId, string? MachineName, string SourcePath,
+    string Harness, string Key, TranscriptKind Kind, string? ParentKey, string? Title, string? FirstPrompt, Guid? ProjectId,
+    string? Project, string? ProjectSubpath, string? WorkingDirectory, string? GitBranch, string? HarnessVersion, Guid MachineId, string? MachineName, string SourcePath,
     DateTimeOffset? StartedAt, DateTimeOffset? LastActivityAt, int UserMessages, int AssistantMessages, int Lines, long Length,
     int Revision, int SubagentCount)
 {
@@ -280,13 +282,10 @@ public sealed record TranscriptResponse(
         var t = view.Transcript;
         var s = t.Summary;
         return new TranscriptResponse(
-            t.Harness.Value, t.Key.Value, t.Kind, t.ParentKey?.Value, s.Title ?? s.FirstPrompt, s.FirstPrompt, ProjectName(s.WorkingDirectory),
-            s.WorkingDirectory, s.GitBranch, s.HarnessVersion, t.MachineId, view.Machine?.Name, t.SourcePath, s.StartedAt, s.LastActivityAt,
+            t.Harness.Value, t.Key.Value, t.Kind, t.ParentKey?.Value, s.Title ?? s.FirstPrompt, s.FirstPrompt, t.ProjectId,
+            view.ProjectName, t.ProjectSubpath, s.WorkingDirectory, s.GitBranch, s.HarnessVersion, t.MachineId, view.Machine?.Name, t.SourcePath, s.StartedAt, s.LastActivityAt,
             s.UserMessages, s.AssistantMessages, s.Lines, t.Length, t.Revision, view.SubagentCount);
     }
-
-    private static string? ProjectName(string? directory) =>
-        directory?.TrimEnd('/', '\\').Split('/', '\\').LastOrDefault(segment => segment.Length > 0);
 }
 
 /// <summary>A transcript with its harness metadata and, for a session, its subagents.</summary>
