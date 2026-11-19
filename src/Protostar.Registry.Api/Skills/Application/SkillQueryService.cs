@@ -65,7 +65,9 @@ public sealed class SkillQueryService
             ? query.Where(v => v.VersionNumber == number)
             : query.Where(v => v.Id == skill.CurrentVersionId);
 
-        var found = await query.AsSplitQuery().FirstOrDefaultAsync(cancellationToken);
+        // At most one row matches (a version number is unique within a skill), so a single query with the
+        // files joined in is enough: no split query, and no ordering is needed for FirstOrDefault.
+        var found = await query.FirstOrDefaultAsync(cancellationToken);
         if (found is null)
             return null;
 
@@ -90,6 +92,12 @@ public sealed record SkillSummary(
     string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes);
 
 /// <summary>One version of a skill with every file's bytes.</summary>
+/// <param name="Name">The skill's name, exactly as stored.</param>
+/// <param name="Version">The version number returned.</param>
+/// <param name="Description">That version's SKILL.md description; <c>null</c> when omitted.</param>
+/// <param name="ContentHash">That version's content hash (see <see cref="Sha256Hash.OfFiles"/>).</param>
+/// <param name="PushedAt">When that version was pushed.</param>
+/// <param name="Files">Every file of the version, ordered by path (ordinal).</param>
 public sealed record SkillVersionContent(
     string Name, int Version, string? Description, string ContentHash, DateTimeOffset PushedAt, IReadOnlyList<SkillFileData> Files);
 
