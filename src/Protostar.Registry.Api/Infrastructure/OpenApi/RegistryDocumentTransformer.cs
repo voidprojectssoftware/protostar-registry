@@ -61,6 +61,12 @@ internal sealed class RegistryDocumentTransformer : IOpenApiDocumentTransformer
             },
             new()
             {
+                Name = ApiTags.Projects,
+                Description = "Which project a folder belongs to, the same on every machine (ADR 0002), and linking a folder to a " +
+                    "project or unlinking it.",
+            },
+            new()
+            {
                 Name = ApiTags.OAuth,
                 Description = "OAuth 2.0 and OpenID Connect protocol endpoints. Clients normally reach these through an OIDC library " +
                     "configured from the discovery document, not by hand.",
@@ -83,6 +89,7 @@ internal static class ApiTags
     public const string Skills = "Skills";
     public const string Machines = "Machines";
     public const string Transcripts = "Transcripts";
+    public const string Projects = "Projects";
     public const string OAuth = "OAuth and OpenID Connect";
     public const string SignIn = "Sign-in pages";
 }

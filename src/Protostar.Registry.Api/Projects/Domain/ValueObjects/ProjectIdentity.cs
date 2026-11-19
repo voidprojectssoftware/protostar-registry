@@ -81,6 +81,24 @@ public sealed record ProjectIdentity
     /// <remarks>Paths are compared exactly as recorded, case included.</remarks>
     public static string FolderKeyFor(Guid machineId, string folder) => $"{machineId}:{folder}";
 
+    /// <summary>Splits a key made by <see cref="FolderKeyFor"/> back into its machine and folder.</summary>
+    public static bool TryParseFolderKey(string key, out Guid machineId, out string folder)
+    {
+        folder = "";
+        var colon = key.IndexOf(':');
+        if (colon < 0 || !Guid.TryParse(key.AsSpan(0, colon), out machineId))
+        {
+            machineId = Guid.Empty;
+            return false;
+        }
+
+        folder = key[(colon + 1)..];
+        return true;
+    }
+
+    /// <summary>The last segment of a path, for names and suggestions.</summary>
+    internal static string LastSegmentOf(string path) => LastSegment(path);
+
     private static string LastSegment(string path) =>
         path.TrimEnd('/', '\\').Split('/', '\\').LastOrDefault(s => s.Length > 0) ?? path;
 }
