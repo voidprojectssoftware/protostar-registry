@@ -12,14 +12,15 @@ namespace Protostar.Registry.Acceptance.Support;
 /// <remarks>
 /// <para>
 /// The environment is <c>Production</c>, so the host takes the same path a deployment does: token certificates from PFX
-/// files, migrations at startup, the client seeder and the search backfill running, no Development sign-in and no
+/// files, migrations at startup, the client seeder running, no Development sign-in and no
 /// Scalar UI. Settings go in with <c>UseSetting</c>, not <c>ConfigureAppConfiguration</c>, because Program reads some of
 /// them (the connection string, the certificate paths) before the host is built.
 /// </para>
 /// <para>
 /// Two things differ from production, both only here: <see cref="AcceptanceSignIn"/> stands in for GitHub, and Data
-/// Protection keys are ephemeral, so the run never writes keys under the user's home. The orphan sweep is off because
-/// it runs on a timer; nothing in these scenarios depends on it.
+/// Protection keys are ephemeral, so the run never writes keys under the user's home. The orphan sweep and the
+/// background reprocessing pass are off because they run on timers: a pass that started on its own could interleave
+/// with a scenario's steps. The reprocessing scenarios run a pass themselves.
 /// </para>
 /// </remarks>
 public sealed class RegistryFactory : WebApplicationFactory<Program>
@@ -46,6 +47,7 @@ public sealed class RegistryFactory : WebApplicationFactory<Program>
         builder.UseSetting("ObjectStore:SecretKey", RegistryInfrastructure.SecretKey);
         builder.UseSetting("ObjectStore:Bucket", _bucket);
         builder.UseSetting("ObjectStore:OrphanSweepEnabled", "false");
+        builder.UseSetting("Reprocessing:Enabled", "false");
         builder.UseSetting("OpenIddict:SigningCertificate:Path", certificates.SigningPath);
         builder.UseSetting("OpenIddict:SigningCertificate:Password", certificates.Password);
         builder.UseSetting("OpenIddict:EncryptionCertificate:Path", certificates.EncryptionPath);

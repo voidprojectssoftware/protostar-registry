@@ -9,8 +9,9 @@ namespace Protostar.Registry.Api.Search;
 
 /// <summary>Writes the search index entries of one transcript chunk or one memory file, replacing any it had.</summary>
 /// <remarks>
-/// Used by the event handlers as content arrives and by <see cref="SearchBackfill"/> for content that arrived before
-/// the index existed or was indexed by an older <see cref="SearchEntry.CurrentIndexVersion"/>. Nothing here logs
+/// Used by the event handlers as content arrives, and by the reprocessing pass (<see cref="TranscriptReprocessor"/> and
+/// <see cref="SearchBackfill"/>) for content that arrived before the index existed or was indexed by an older
+/// <see cref="SearchEntry.CurrentIndexVersion"/>. Nothing here logs
 /// content: only ids and counts.
 /// </remarks>
 public sealed class SearchIndexer
@@ -82,7 +83,7 @@ public sealed class SearchIndexer
 /// <summary>Indexes each appended transcript chunk from the text its event carries.</summary>
 /// <remarks>
 /// Runs after the append has committed. A failure here must not fail the append, which already stored the chunk, so
-/// it is logged (ids only) and the chunk is left for <see cref="SearchBackfill"/>, which finds chunks with no entry.
+/// it is logged (ids only) and the chunk is left for <see cref="TranscriptReprocessor"/>, which finds chunks with no entry.
 /// </remarks>
 public sealed class IndexAppendedChunk : IDomainEventHandler<TranscriptChunkAppended>
 {
@@ -105,7 +106,7 @@ public sealed class IndexAppendedChunk : IDomainEventHandler<TranscriptChunkAppe
         }
         catch (Exception ex) when (ex is DbUpdateException or Npgsql.NpgsqlException)
         {
-            _logger.LogWarning(ex, "Could not index chunk {ChunkId} of transcript {TranscriptId}; the search backfill will retry it",
+            _logger.LogWarning(ex, "Could not index chunk {ChunkId} of transcript {TranscriptId}; reprocessing will retry it",
                 domainEvent.ChunkId, domainEvent.TranscriptId);
         }
     }

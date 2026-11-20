@@ -2,14 +2,37 @@ namespace Protostar.Registry.Api.Sessions;
 
 /// <summary>What a transcript's parsed lines say about it: the facts listings and search show.</summary>
 /// <remarks>
+/// <para>
 /// Built incrementally: each appended chunk is parsed into a <see cref="TranscriptFacts"/> and folded in
-/// with <see cref="Add"/>, so the registry never re-reads stored chunks to keep it current. Later facts win
+/// with <see cref="Add"/>, so appends never re-read stored chunks to keep it current. Later facts win
 /// for values that change during a session (title, branch, harness version); counts accumulate; the first
 /// and last timestamps widen.
+/// </para>
+/// <para>
+/// <see cref="ParserVersion"/> records which parsing built it. A summary started from <see cref="Empty"/> is
+/// current; one stored by an older registry is not, and the reprocessor rebuilds it from the stored chunks.
+/// </para>
 /// </remarks>
 public sealed record TranscriptSummary
 {
-    public static readonly TranscriptSummary Empty = new();
+    /// <summary>The version of the parsing that builds summaries.</summary>
+    /// <remarks>
+    /// Bump it whenever a change to a parser (or to <see cref="Add"/>) would give an existing transcript a different
+    /// summary. Summaries of an older version are rebuilt in the background by <c>TranscriptReprocessor</c>. If the
+    /// change also alters the text the search index gets, bump <c>SearchEntry.CurrentIndexVersion</c> too.
+    /// </remarks>
+    public const int CurrentParserVersion = 1;
+
+    /// <summary>The summary of a transcript with no lines yet, at <see cref="CurrentParserVersion"/>.</summary>
+    public static readonly TranscriptSummary Empty = new() { ParserVersion = CurrentParserVersion };
+
+    /// <summary>The <see cref="CurrentParserVersion"/> the summary was built with; 0 for summaries stored before versions existed.</summary>
+    /// <remarks><see cref="Add"/> keeps it, so appending to an old summary never passes it off as current.</remarks>
+    public int ParserVersion { get; init; }
+
+    /// <summary>Whether this registry's parsing built the summary, so there is nothing to rebuild.</summary>
+    /// <remarks>A newer version counts as current: an older instance running beside a newer one must not rebuild its work.</remarks>
+    public bool IsCurrent => ParserVersion >= CurrentParserVersion;
 
     /// <summary>The harness's own title for the session, when it has written one.</summary>
     public string? Title { get; init; }

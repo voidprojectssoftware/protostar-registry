@@ -184,6 +184,21 @@ public sealed class Transcript : AggregateRoot
 
         return TranscriptAppendOutcome.Appended(chunk);
     }
+
+    /// <summary>Replaces the summary with <paramref name="rebuilt"/>, built from the first <paramref name="length"/> bytes of <paramref name="revision"/>.</summary>
+    /// <remarks>
+    /// Returns false and changes nothing unless that is exactly what the transcript holds now, so a summary built
+    /// before an append (or before a new revision began) can never replace one that covers more. Raises no event and
+    /// leaves <see cref="UpdatedAt"/> alone: the transcript's content did not change, only how it was read.
+    /// </remarks>
+    public bool ReplaceSummary(TranscriptSummary rebuilt, int revision, long length)
+    {
+        if (revision != Revision || length != Length)
+            return false;
+
+        Summary = rebuilt;
+        return true;
+    }
 }
 
 /// <summary>The result of <see cref="Transcript.Append"/>.</summary>

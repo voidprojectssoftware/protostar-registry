@@ -623,6 +623,9 @@ namespace Protostar.Registry.Api.Migrations
                             b1.Property<int>("MalformedLines")
                                 .HasColumnType("integer");
 
+                            b1.Property<int>("ParserVersion")
+                                .HasColumnType("integer");
+
                             b1.Property<DateTimeOffset?>("StartedAt")
                                 .HasColumnType("timestamp with time zone");
 
