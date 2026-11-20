@@ -28,3 +28,6 @@ Thumbs.db
 
 # PR and comment bodies written by agents (docs/process/working-an-issue.md)
 .bodies/
+
+# Agent scratch space (docs/process)
+.scratch/

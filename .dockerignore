@@ -1,0 +1,13 @@
+# Only src/ and the build props are needed; keep secrets, history and build output out of the context.
+**/bin/
+**/obj/
+.git
+.github/
+.scratch/
+.bodies/
+.claude/
+docs/
+test/
+**/*.pfx
+**/.env
+**/*.env

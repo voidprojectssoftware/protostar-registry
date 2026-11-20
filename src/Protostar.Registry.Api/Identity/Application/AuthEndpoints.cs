@@ -134,7 +134,7 @@ public static class AuthEndpoints
         context.Features.Get<OpenIddictServerAspNetCoreFeature>()?.Transaction?.Request
             ?? throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
 
-    private static async Task<IResult> AuthorizeAsync(HttpContext context, RegistryDbContext db)
+    private static async Task<IResult> AuthorizeAsync(HttpContext context, RegistryDbContext db, AuthProviders providers)
     {
         var request = GetServerRequest(context);
 
@@ -146,7 +146,7 @@ public static class AuthEndpoints
         {
             var returnUrl = context.Request.PathBase + context.Request.Path + context.Request.QueryString;
 
-            if (AuthProviders.ByHint(context.Request.Query["identity_provider"].ToString()) is { } hinted)
+            if (providers.ByHint(context.Request.Query["identity_provider"].ToString()) is { } hinted)
             {
                 return Results.Challenge(
                     new AuthenticationProperties { RedirectUri = returnUrl },

@@ -1,0 +1,77 @@
+# Reference deployment of the protostar registry: the API image, Postgres 18 and RustFS 1.0.5 (the same
+# versions the Aspire AppHost runs). Adapt it; do not run it unread. Every variable is described in
+# docs/deploy/production.md.
+#
+# It expects, next to it:
+#   .env           the ${...} values below (compose reads it automatically; keep it out of git)
+#   token-certs/   signing.pfx and encryption.pfx from scripts/generate-token-certificates.sh,
+#                  readable by UID 1654
+#
+# TLS terminates at a reverse proxy in front of the API (it serves plain HTTP on 8080). The proxy must send
+# X-Forwarded-Proto, X-Forwarded-Host and X-Forwarded-For, and its address must be in
+# ForwardedHeaders__KnownProxies or __KnownNetworks as the API sees it.
+#
+#   docker compose -f docker-compose.example.yml up -d
+
+services:
+  api:
+    image: ghcr.io/voidprojectssoftware/protostar-registry:${REGISTRY_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      objectstore:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      # GSS Encryption Mode=Disable: the image has no Kerberos library, and without it Npgsql logs a load error.
+      ConnectionStrings__registrydb: "Host=postgres;Port=5432;Database=registry;Username=registry;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD};GSS Encryption Mode=Disable"
+      ObjectStore__ServiceUrl: http://objectstore:9000
+      ObjectStore__AccessKey: ${OBJECTSTORE_ACCESS_KEY:?set OBJECTSTORE_ACCESS_KEY}
+      ObjectStore__SecretKey: ${OBJECTSTORE_SECRET_KEY:?set OBJECTSTORE_SECRET_KEY}
+      ObjectStore__Bucket: protostar-registry
+      GitHub__ClientId: ${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}
+      GitHub__ClientSecret: ${GITHUB_CLIENT_SECRET:?set GITHUB_CLIENT_SECRET}
+      OpenIddict__Issuer: ${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN, for example https://registry.example.com}
+      OpenIddict__SigningCertificate__Path: /token-certs/signing.pfx
+      OpenIddict__SigningCertificate__Password: ${TOKEN_SIGNING_PASSWORD:?set TOKEN_SIGNING_PASSWORD}
+      OpenIddict__EncryptionCertificate__Path: /token-certs/encryption.pfx
+      OpenIddict__EncryptionCertificate__Password: ${TOKEN_ENCRYPTION_PASSWORD:?set TOKEN_ENCRYPTION_PASSWORD}
+      ForwardedHeaders__KnownProxies: ${KNOWN_PROXIES:-}
+      ForwardedHeaders__KnownNetworks: ${KNOWN_NETWORKS:-}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./token-certs:/token-certs:ro
+      - dataprotection:/home/app/.aspnet/DataProtection-Keys
+
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: registry
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: registry
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/18/docker; mount the parent.
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registry -d registry"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  objectstore:
+    image: rustfs/rustfs:1.0.5
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${OBJECTSTORE_ACCESS_KEY:?set OBJECTSTORE_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${OBJECTSTORE_SECRET_KEY:?set OBJECTSTORE_SECRET_KEY}
+    volumes:
+      - objectstore:/data
+
+volumes:
+  postgres:
+  objectstore:
+  dataprotection:

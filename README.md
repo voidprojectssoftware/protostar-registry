@@ -75,8 +75,8 @@ dotnet user-secrets set "Parameters:GitHubClientSecret" "<client-secret>"
 dotnet run --project src/Protostar.Registry.AppHost
 ```
 
-The dashboard URL is printed on startup. The API applies EF Core migrations and seeds the
-`protostar-cli` public client automatically in Development.
+The dashboard URL is printed on startup. On startup the API applies EF Core migrations and seeds the
+`protostar-cli` public client, in every environment.
 
 ```bash
 dotnet build      # build the solution
@@ -89,10 +89,14 @@ Same model as the CLI repo, but the artifact is a **container image** rather tha
 
 - **stable** — [Conventional Commits](https://www.conventionalcommits.org) drive a
   release-please Release PR; merging it tags `vX.Y.Z` and the workflow builds and pushes the
-  image to GHCR as `:vX.Y.Z` and `:latest`. MinVer reads the tag and stamps it into the image.
-- **edge** — every code change to `main` rebuilds and pushes a rolling `:edge` image,
+  image (root `Dockerfile`) to GHCR as `:vX.Y.Z` and `:latest`, stamped with that version.
+- **edge**: every code change to `main` rebuilds and pushes a rolling `:edge` image, plus an
+  immutable `:sha-<short>`,
   versioned by MinVer (`0.X.Y-alpha.0.N`). The `edge` tag does not start with `v`, so MinVer
   ignores it and the channels never collide.
+
+To run the image (environment variables, keys, reverse proxy, a reference Compose file), see
+**[docs/deploy/production.md](docs/deploy/production.md)**.
 
 While pre-1.0, `bump-minor-pre-major` keeps breaking changes in the `0.x` range; cutting
 `1.0.0` will be a deliberate choice.
