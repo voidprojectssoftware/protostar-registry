@@ -69,6 +69,18 @@ public static class SessionEndpoints
     private static readonly string InvalidKeyPrefixTitle =
         $"keyPrefix must be at least {TranscriptKeyPrefix.MinLength} of the characters a transcript key may hold: letters, digits, '.', '_' or '-'.";
 
+    private const string SkillsDescription =
+        """
+        Lists the skills the transcript invoked, earliest first used first: through the Skill tool, or by the user typing
+        the skill's slash command. A session's list includes what its subagents invoked.
+
+        Each name is matched to your skills in the registry: the session's project first, then your personal skills.
+        A transcript records only the name, so `version` is inferred: the newest version pushed at or before the
+        session last used the skill (`versionInferred` is then `true`). With no version pushed by then, `version` is
+        absent. A plugin skill (`plugin:skill`) matches nothing. A skill since deleted is reported with `deleted: true`.
+        Only names, counts and times are kept, never the arguments a skill was invoked with.
+        """;
+
     private const string UnknownTranscriptResponse =
         $"No transcript with that harness and key. The problem `type` is `{SessionProblemTypes.UnknownTranscript}`.";
 
@@ -130,6 +142,14 @@ public static class SessionEndpoints
             .WithSummary("Get a transcript's summary")
             .WithDescription("Returns what the registry parsed from the transcript, and for a session, its subagents.")
             .Produces<TranscriptDetailResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
+
+        transcripts.MapGet("/skills", GetSkillsAsync)
+            .WithName("GetTranscriptSkills")
+            .WithSummary("List the skills a session used")
+            .WithDescription(SkillsDescription)
+            .Produces<TranscriptSkillsResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound)
             .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
 
@@ -242,6 +262,22 @@ public static class SessionEndpoints
 
         var (view, subagents) = result.Value;
         return Results.Ok(TranscriptDetailResponse.From(view, subagents));
+    }
+
+    private static async Task<IResult> GetSkillsAsync(
+        [Description("The harness that wrote the transcript.")] string harness,
+        [Description("The transcript's key.")] string key,
+        ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var result = await service.GetSkillsAsync(ownerId, harness, key, cancellationToken);
+        if (result.Failure != TranscriptFailure.None)
+            return Failure(result);
+
+        var (transcript, skills) = result.Value;
+        return Results.Ok(TranscriptSkillsResponse.From(transcript, skills));
     }
 
     private static async Task<IResult> LookupAsync(
@@ -416,4 +452,30 @@ public sealed record TranscriptDetailResponse(TranscriptResponse Transcript, Jso
         TranscriptResponse.From(view),
         view.Transcript.MetadataJson is { } json ? JsonDocument.Parse(json).RootElement.Clone() : null,
         subagents.Select(TranscriptResponse.From).ToList());
+}
+
+/// <summary>The skills a transcript used.</summary>
+/// <param name="Harness">The harness that wrote it.</param>
+/// <param name="Key">Its key.</param>
+/// <param name="Skills">Each skill it (and, for a session, its subagents) invoked, earliest first used first.</param>
+public sealed record TranscriptSkillsResponse(string Harness, string Key, IReadOnlyList<TranscriptSkillResponse> Skills)
+{
+    internal static TranscriptSkillsResponse From(Transcript transcript, IReadOnlyList<SessionSkill> skills) =>
+        new(transcript.Harness.Value, transcript.Key.Value, skills.Select(TranscriptSkillResponse.From).ToList());
+}
+
+/// <summary>One skill a transcript used, and the registry skill and version it was.</summary>
+/// <param name="Name">The name as invoked; a plugin skill keeps its <c>plugin:skill</c> form.</param>
+/// <param name="Uses">How many times it was invoked.</param>
+/// <param name="FirstUsedAt">The first invocation's time; absent when none was recorded.</param>
+/// <param name="LastUsedAt">The last invocation's time; absent when none was recorded.</param>
+/// <param name="SkillId">The registry skill it matched; absent when it matched none or was deleted.</param>
+/// <param name="Version">The version inferred to have been used; absent when none had been pushed by then.</param>
+/// <param name="VersionInferred">True when <paramref name="Version"/> is present: it is inferred from push times, never read from the transcript.</param>
+/// <param name="Deleted">True when the skill has since been deleted from the registry.</param>
+public sealed record TranscriptSkillResponse(
+    string Name, int Uses, DateTimeOffset? FirstUsedAt, DateTimeOffset? LastUsedAt, Guid? SkillId, int? Version, bool VersionInferred, bool Deleted)
+{
+    internal static TranscriptSkillResponse From(SessionSkill s) =>
+        new(s.Name, s.Uses, s.FirstUsedAt, s.LastUsedAt, s.SkillId, s.Version, s.Version is not null, s.Deleted);
 }

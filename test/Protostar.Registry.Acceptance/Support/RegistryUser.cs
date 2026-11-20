@@ -68,21 +68,32 @@ public sealed class RegistryUser
     /// <param name="key">The session's key; a new random UUID when omitted.</param>
     public async Task<string> BackUpSessionAsync(Func<string, byte[]> content, string? key = null)
     {
-        var machineId = await EnsureMachineAsync();
         key ??= Guid.NewGuid().ToString();
+        await BackUpTranscriptAsync(key, content(key));
+        return key;
+    }
 
+    /// <summary>Registers the transcript <paramref name="key"/> and appends <paramref name="content"/> as its first chunk.</summary>
+    /// <param name="key">The transcript's key.</param>
+    /// <param name="content">Its JSONL.</param>
+    /// <param name="parentKey">For a subagent, the session it ran in; <c>null</c> for a session.</param>
+    /// <param name="project">The facts of the folder it ran in, to file it under that folder's project; optional.</param>
+    public async Task BackUpTranscriptAsync(string key, byte[] content, string? parentKey = null, JsonObject? project = null)
+    {
+        var machineId = await EnsureMachineAsync();
         var registered = await Http.PutAsJsonAsync($"/v1/transcripts/{Harness}/{key}", new
         {
-            kind = "session",
+            kind = parentKey is null ? "session" : "subagent",
+            parentKey,
             machineId,
             sourcePath = $"/home/{Login}/.claude/projects/demo/{key}.jsonl",
+            project,
         });
-        Assert.True(registered.IsSuccessStatusCode, $"Registering the session answered {(int)registered.StatusCode}.");
+        Assert.True(registered.IsSuccessStatusCode, $"Registering the transcript answered {(int)registered.StatusCode}: {await registered.Content.ReadAsStringAsync()}");
         var position = (await registered.Content.ReadFromJsonAsync<JsonObject>())!;
 
-        var appended = await AppendAsync(key, content(key), position["revision"]!.GetValue<int>(), position["length"]!.GetValue<long>());
-        Assert.True(appended.IsSuccessStatusCode, $"Appending to the session answered {(int)appended.StatusCode}: {await appended.Content.ReadAsStringAsync()}");
-        return key;
+        var appended = await AppendAsync(key, content, position["revision"]!.GetValue<int>(), position["length"]!.GetValue<long>());
+        Assert.True(appended.IsSuccessStatusCode, $"Appending to the transcript answered {(int)appended.StatusCode}: {await appended.Content.ReadAsStringAsync()}");
     }
 
     /// <summary>Appends one line in which the user typed <paramref name="prompt"/> to the session <paramref name="key"/>, at the given position.</summary>
@@ -108,6 +119,30 @@ public sealed class RegistryUser
         ["cwd"] = $"/home/{Login}/src/demo",
         ["message"] = new JsonObject { ["role"] = "user", ["content"] = prompt },
     };
+
+    /// <summary>A Claude Code assistant line in which the model invoked <paramref name="skill"/> with the Skill tool at <paramref name="at"/>.</summary>
+    /// <remarks>The <c>args</c> are there so a scenario can check they are never kept.</remarks>
+    public static JsonObject SkillCallLine(string key, string skill, DateTimeOffset at, string args = "") => new()
+    {
+        ["type"] = "assistant",
+        ["sessionId"] = key,
+        ["timestamp"] = at.ToString("O"),
+        ["message"] = new JsonObject
+        {
+            ["role"] = "assistant",
+            ["content"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "tool_use",
+                ["id"] = "toolu_" + Guid.NewGuid().ToString("N"),
+                ["name"] = "Skill",
+                ["input"] = new JsonObject { ["skill"] = skill, ["args"] = args },
+            }),
+        },
+    };
+
+    /// <summary>The JSONL of <paramref name="lines"/>, one per line.</summary>
+    public static byte[] Jsonl(params JsonObject[] lines) =>
+        Encoding.UTF8.GetBytes(string.Concat(lines.Select(line => line.ToJsonString() + "\n")));
 
     /// <summary>Backs up one memory file of the folder <paramref name="facts"/> describes, and returns the project it was filed under.</summary>
     public async Task<Guid> PushMemoryAsync(JsonObject facts, string path, string content)

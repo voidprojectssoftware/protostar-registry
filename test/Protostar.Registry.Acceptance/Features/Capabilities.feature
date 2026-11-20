@@ -23,6 +23,7 @@ Feature: The registry says which features it serves
       | sessions                 |
       | transcript-lookup        |
       | transcript-prefix-lookup |
+      | session-skills           |
       | redacted-read            |
       | projects                 |
       | memory                   |
@@ -48,6 +49,7 @@ Feature: The registry says which features it serves
       | sessions                 |
       | transcript-lookup        |
       | transcript-prefix-lookup |
+      | session-skills           |
       | redacted-read            |
       | projects                 |
       | memory                   |

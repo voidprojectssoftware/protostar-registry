@@ -38,6 +38,7 @@ public sealed class CapabilitySteps
             ["sessions"] = UseSessionsAsync,
             ["transcript-lookup"] = UseTranscriptLookupAsync,
             ["transcript-prefix-lookup"] = UseTranscriptPrefixLookupAsync,
+            ["session-skills"] = UseSessionSkillsAsync,
             ["redacted-read"] = UseRedactedReadAsync,
             ["projects"] = UseProjectsAsync,
             ["memory"] = UseMemoryAsync,
@@ -175,6 +176,17 @@ public sealed class CapabilitySteps
         var found = (await user.GetJsonAsync($"/v1/transcripts?keyPrefix={key[..8].ToUpperInvariant()}&limit=11")).AsArray();
         Assert.Equal(key, Assert.Single(found)!["key"]!.GetValue<string>());
         await AssertStatusAsync(user.Http.GetAsync("/v1/transcripts?keyPrefix=abc"), HttpStatusCode.BadRequest);
+    }
+
+    private static async Task UseSessionSkillsAsync(RegistryUser user)
+    {
+        await AssertStatusAsync(user.PushSkillAsync("probe"), HttpStatusCode.Created);
+        var usedAt = DateTimeOffset.UtcNow;
+        var key = await user.BackUpSessionAsync(k => RegistryUser.Jsonl(RegistryUser.SkillCallLine(k, "probe", usedAt)));
+        var used = Assert.Single((await user.GetJsonAsync($"/v1/transcripts/{RegistryUser.Harness}/{key}/skills"))["skills"]!.AsArray())!;
+        Assert.Equal("probe", used["name"]!.GetValue<string>());
+        Assert.Equal(1, used["version"]!.GetValue<int>());
+        Assert.True(used["versionInferred"]!.GetValue<bool>());
     }
 
     private static async Task UseRedactedReadAsync(RegistryUser user)
