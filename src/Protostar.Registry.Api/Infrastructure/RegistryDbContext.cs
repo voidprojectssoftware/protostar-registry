@@ -60,6 +60,15 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
         }
     }
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+
+        // Npgsql writes only offset 0 to timestamptz; converting here covers every DateTimeOffset column,
+        // nullable ones and complex-type members included, so no feature has to remember it.
+        configurationBuilder.Properties<DateTimeOffset>().HaveConversion<UtcDateTimeOffsetConverter>();
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
