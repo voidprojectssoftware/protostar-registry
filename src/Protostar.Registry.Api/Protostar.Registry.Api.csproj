@@ -31,4 +31,8 @@
     <ProjectReference Include="..\Protostar.Registry.ServiceDefaults\Protostar.Registry.ServiceDefaults.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Protostar.Registry.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -24,6 +24,7 @@ Feature: Each user sees only their own data
     But bob's session list is empty
     And bob reading alice's session is refused with 404
     And bob downloading alice's session is refused with 404
+    And bob reading alice's session redacted is refused with 404
     And bob looking up alice's session finds it unknown
 
   Scenario: bob cannot list or read alice's memory

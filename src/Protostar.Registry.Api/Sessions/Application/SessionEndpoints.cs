@@ -43,6 +43,17 @@ public static class SessionEndpoints
         whose harness or key is not valid, is reported as not `known`, the same as one that was never registered.
         """;
 
+    private const string DownloadDescription =
+        """
+        Streams the current revision's content, in order.
+
+        By default the content is exactly as stored: the original JSONL bytes, which backups, restores and
+        verification rely on. Pass `redacted=true` to read it as a person or an agent should: each line has
+        known secrets (tokens, keys, passwords) replaced by a marker such as `[redacted:github-token]`, the
+        same redaction search applies. Secrets are redacted inside JSON string values, so every line that was
+        JSON is still JSON; a line with nothing to redact is unchanged, byte for byte.
+        """;
+
     private const string UnknownMachineResponse =
         $"Invalid request. When the machine is not registered, the problem `type` is `{SessionProblemTypes.UnknownMachine}`; register it with `PUT /v1/machines/{{machineId}}` and retry.";
 
@@ -97,9 +108,9 @@ public static class SessionEndpoints
         transcripts.MapGet("/content", DownloadAsync)
             .WithName("DownloadTranscriptContent")
             .WithSummary("Download a transcript")
-            .WithDescription("Streams the current revision's content as stored: the original JSONL bytes, in order.")
+            .WithDescription(DownloadDescription)
             .Produces<string>(StatusCodes.Status200OK, "application/x-ndjson")
-            .WithResponseDescription(StatusCodes.Status200OK, "The transcript's JSONL.")
+            .WithResponseDescription(StatusCodes.Status200OK, "The transcript's JSONL: as stored, or with secrets redacted when `redacted=true`.")
             .ProducesProblem(StatusCodes.Status404NotFound)
             .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
         transcripts.MapGet("", GetAsync)
@@ -188,6 +199,7 @@ public static class SessionEndpoints
     private static async Task<IResult> DownloadAsync(
         [Description("The harness that wrote the transcript.")] string harness,
         [Description("The transcript's key.")] string key,
+        [Description("`true` to redact secrets from the content before it is sent; `false` (the default) for the stored bytes.")] bool? redacted,
         ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
     {
         if (!TryGetOwner(user, out var ownerId))
@@ -198,7 +210,7 @@ public static class SessionEndpoints
             return Failure(TranscriptResult<Transcript>.NotFound());
 
         return Results.Stream(
-            stream => service.CopyContentAsync(found.Chunks, stream, cancellationToken),
+            stream => service.CopyContentAsync(found.Chunks, redacted ?? false, stream, cancellationToken),
             "application/x-ndjson",
             fileDownloadName: $"{found.Transcript.Key.Value}.jsonl");
     }

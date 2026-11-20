@@ -57,7 +57,11 @@ public sealed class RegistryUser
     }
 
     /// <summary>Backs up a new Claude Code session in which the user typed <paramref name="prompt"/>, and returns its key.</summary>
-    public async Task<string> BackUpSessionAsync(string prompt)
+    public Task<string> BackUpSessionAsync(string prompt) =>
+        BackUpSessionAsync(key => Encoding.UTF8.GetBytes(PromptLine(key, prompt).ToJsonString() + "\n"));
+
+    /// <summary>Backs up a new Claude Code session whose JSONL is what <paramref name="content"/> returns for its key, and returns the key.</summary>
+    public async Task<string> BackUpSessionAsync(Func<string, byte[]> content)
     {
         var machineId = await EnsureMachineAsync();
         var key = Guid.NewGuid().ToString();
@@ -71,28 +75,34 @@ public sealed class RegistryUser
         Assert.True(registered.IsSuccessStatusCode, $"Registering the session answered {(int)registered.StatusCode}.");
         var position = (await registered.Content.ReadFromJsonAsync<JsonObject>())!;
 
-        var appended = await AppendPromptAsync(key, prompt, position["revision"]!.GetValue<int>(), position["length"]!.GetValue<long>());
+        var appended = await AppendAsync(key, content(key), position["revision"]!.GetValue<int>(), position["length"]!.GetValue<long>());
         Assert.True(appended.IsSuccessStatusCode, $"Appending to the session answered {(int)appended.StatusCode}: {await appended.Content.ReadAsStringAsync()}");
         return key;
     }
 
     /// <summary>Appends one line in which the user typed <paramref name="prompt"/> to the session <paramref name="key"/>, at the given position.</summary>
-    public async Task<HttpResponseMessage> AppendPromptAsync(string key, string prompt, int revision, long offset)
+    public Task<HttpResponseMessage> AppendPromptAsync(string key, string prompt, int revision, long offset) =>
+        AppendAsync(key, Encoding.UTF8.GetBytes(PromptLine(key, prompt).ToJsonString() + "\n"), revision, offset);
+
+    /// <summary>Appends <paramref name="content"/>, whole JSONL lines, to the session <paramref name="key"/>, at the given position.</summary>
+    public async Task<HttpResponseMessage> AppendAsync(string key, byte[] content, int revision, long offset)
     {
         var machineId = await EnsureMachineAsync();
-        var line = new JsonObject
-        {
-            ["type"] = "user",
-            ["sessionId"] = key,
-            ["timestamp"] = "2026-11-19T10:00:00Z",
-            ["cwd"] = $"/home/{Login}/src/demo",
-            ["message"] = new JsonObject { ["role"] = "user", ["content"] = prompt },
-        };
-        var body = new ByteArrayContent(Encoding.UTF8.GetBytes(line.ToJsonString() + "\n"));
+        var body = new ByteArrayContent(content);
         body.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         return await Http.PostAsync(
             $"/v1/transcripts/{Harness}/{key}/content?revision={revision}&offset={offset}&machineId={machineId}", body);
     }
+
+    /// <summary>A Claude Code transcript line in which the user typed <paramref name="prompt"/> in the session <paramref name="key"/>.</summary>
+    public JsonObject PromptLine(string key, string prompt) => new()
+    {
+        ["type"] = "user",
+        ["sessionId"] = key,
+        ["timestamp"] = "2026-11-19T10:00:00Z",
+        ["cwd"] = $"/home/{Login}/src/demo",
+        ["message"] = new JsonObject { ["role"] = "user", ["content"] = prompt },
+    };
 
     /// <summary>Backs up one memory file of the folder <paramref name="facts"/> describes, and returns the project it was filed under.</summary>
     public async Task<Guid> PushMemoryAsync(JsonObject facts, string path, string content)
