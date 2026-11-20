@@ -69,20 +69,20 @@ public sealed class SessionSkillsTests
     }
 
     [Fact]
-    public void A_project_skill_wins_over_a_personal_skill_of_the_same_name()
+    public void A_personal_skill_wins_over_a_project_skill_of_the_same_name()
     {
         var personal = SkillWithVersionsAt("deploy", null, Monday);
         var inProject = SkillWithVersionsAt("deploy", Project, Monday);
 
-        Assert.Equal(inProject.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal, inProject]).SkillId);
+        Assert.Equal(personal.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal, inProject]).SkillId);
     }
 
     [Fact]
-    public void A_personal_skill_matches_when_the_project_has_none_of_that_name()
+    public void A_project_skill_matches_when_there_is_no_personal_skill_of_that_name()
     {
-        var personal = SkillWithVersionsAt("deploy", null, Monday);
+        var inProject = SkillWithVersionsAt("deploy", Project, Monday);
 
-        Assert.Equal(personal.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal]).SkillId);
+        Assert.Equal(inProject.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [inProject]).SkillId);
     }
 
     [Fact]
@@ -121,12 +121,12 @@ public sealed class SessionSkillsTests
     }
 
     [Fact]
-    public void A_deleted_project_skill_is_reported_deleted_rather_than_falling_back_to_a_personal_skill()
+    public void A_deleted_personal_skill_is_reported_deleted_rather_than_falling_back_to_a_project_skill()
     {
-        var personal = SkillWithVersionsAt("deploy", null, Monday);
-        var tombstone = SkillTombstone.Deleted(SkillWithVersionsAt("deploy", Project, Monday), 1, Monday.AddDays(1));
+        var inProject = SkillWithVersionsAt("deploy", Project, Monday);
+        var tombstone = SkillTombstone.Deleted(SkillWithVersionsAt("deploy", null, Monday), 1, Monday.AddDays(1));
 
-        Assert.True(MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal], [tombstone]).Deleted);
+        Assert.True(MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [inProject], [tombstone]).Deleted);
     }
 
     [Fact]

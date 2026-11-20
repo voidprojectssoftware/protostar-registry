@@ -74,7 +74,8 @@ public static class SessionEndpoints
         Lists the skills the transcript invoked, earliest first used first: through the Skill tool, or by the user typing
         the skill's slash command. A session's list includes what its subagents invoked.
 
-        Each name is matched to your skills in the registry: the session's project first, then your personal skills.
+        Each name is matched to your skills in the registry: your personal skills first, then the session's project,
+        as Claude Code loads them.
         A transcript records only the name, so `version` is inferred: the newest version pushed at or before the
         session last used the skill (`versionInferred` is then `true`). With no version pushed by then, `version` is
         absent. A plugin skill (`plugin:skill`) matches nothing. A skill since deleted is reported with `deleted: true`.

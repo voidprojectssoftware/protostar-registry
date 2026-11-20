@@ -175,9 +175,9 @@ public sealed class SessionSkillSteps
         Assert.Null(used["version"]);
     }
 
-    [Then("the session's {string} is the project's skill, not the personal one")]
-    public void ThenTheProjectSkillWins(string name) =>
-        Assert.Equal(_projectSkillId, Used(name, 1)["skillId"]!.GetValue<Guid>());
+    [Then("the session's {string} is the personal skill, not the project's")]
+    public void ThenThePersonalSkillWins(string name) =>
+        Assert.Equal(_skillIds[name], Used(name, 1)["skillId"]!.GetValue<Guid>());
 
     [Then("the session used no skills")]
     public void ThenNoSkills() => Assert.Empty(Answer);

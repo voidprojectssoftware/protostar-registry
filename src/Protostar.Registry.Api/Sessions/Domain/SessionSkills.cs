@@ -22,8 +22,9 @@ public sealed record SessionSkill(
 /// or no invocation had a timestamp) the skill is reported with no version.
 /// </para>
 /// <para>
-/// A name is looked up in the session's project first, then among the owner's personal (global) skills, and the first
-/// scope that knows the name decides: a project skill wins over a personal skill of the same name. Within a scope a live
+/// A name is looked up among the owner's personal (global) skills first, then in the session's project, and the first
+/// scope that knows the name decides: a personal skill wins over a project skill of the same name. That is Claude Code's
+/// loading rule (enterprise, then personal, then project), so it is the skill the session actually ran. Within a scope a live
 /// skill of that name matches; otherwise a removed name does: one renamed away matches the skill under its new name
 /// (renaming keeps the skill and its versions), and one deleted is reported as deleted, with no skill or version, since
 /// both went with it. A plugin skill (<c>plugin:skill</c>) never matches: plugins' skills are not pushed to the registry.
@@ -43,7 +44,7 @@ public static class SessionSkills
     public static IReadOnlyList<SessionSkill> Match(
         IReadOnlyList<SkillUse> uses, Guid? projectId, IReadOnlyList<Skill> skills, IReadOnlyList<SkillTombstone> tombstones)
     {
-        Guid?[] scopes = projectId is { } project ? [project, null] : [null];
+        Guid?[] scopes = projectId is { } project ? [null, project] : [null];
         return uses
             .Select(use => Match(use, scopes, skills, tombstones))
             .OrderBy(s => s.FirstUsedAt ?? DateTimeOffset.MaxValue)

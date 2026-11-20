@@ -59,11 +59,11 @@ Feature: See which skills a session used
     Then the subagent used "deploy" 1 time, matched to her skill at inferred version 1
     And the subagent used no other skills
 
-  Scenario: A project skill wins over a personal skill of the same name
+  Scenario: A personal skill wins over a project skill of the same name, as Claude Code loads them
     Given alice has pushed a personal skill "deploy" and a skill "deploy" in her project "demo"
     And alice has backed up a session in "demo" that used "deploy"
     When alice asks which skills the session used
-    Then the session's "deploy" is the project's skill, not the personal one
+    Then the session's "deploy" is the personal skill, not the project's
 
   Scenario: Another user sees nothing of a session's skills
     Given the user "bob" is signed in
