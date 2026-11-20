@@ -45,6 +45,7 @@ public sealed class CapabilitySteps
             ["memory-content"] = UseMemoryContentAsync,
             ["memory-base-versions"] = UseMemoryBaseVersionsAsync,
             ["search"] = UseSearchAsync,
+            ["memory-redacted-read"] = UseMemoryRedactedReadAsync,
         };
     }
 
@@ -252,6 +253,15 @@ public sealed class CapabilitySteps
         var key = await user.BackUpSessionAsync("the zebra crossing is closed");
         var hits = (await user.GetJsonAsync("/v1/search?q=zebra")).AsArray();
         Assert.Equal(key, Assert.Single(hits)!["key"]!.GetValue<string>());
+    }
+
+    private static async Task UseMemoryRedactedReadAsync(RegistryUser user)
+    {
+        var projectId = await user.PushMemoryAsync(
+            RegistryUser.GitFolder("/home/alice/src/demo", RegistryUser.NewCommit()), "MEMORY.md", $"the token is {GitHubToken}");
+        var file = Assert.Single((await user.GetJsonAsync($"/v1/memory/{projectId}/content?redacted=true"))["files"]!.AsArray())!;
+        var read = Encoding.UTF8.GetString(Convert.FromBase64String(file["content"]!.GetValue<string>()));
+        Assert.Equal("the token is [redacted:github-token]", read);
     }
 
     private static async Task<JsonObject> AssertStatusAsync(Task<HttpResponseMessage> request, HttpStatusCode expected)

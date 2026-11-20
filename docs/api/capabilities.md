@@ -10,7 +10,8 @@
   "apiMajors": [1],
   "capabilities": ["skills", "stale-skill-push", "project-skills", "skill-rename", "skill-delete", "skill-tombstones",
                    "sessions", "transcript-lookup", "transcript-prefix-lookup", "session-skills", "redacted-read",
-                   "projects", "memory", "memory-content", "memory-base-versions", "search"]
+                   "projects", "memory", "memory-content", "memory-base-versions", "search",
+                   "memory-redacted-read"]
 }
 ```
 
@@ -52,6 +53,7 @@ be added or dropped unnoticed, and cannot stay listed after its feature is gone.
 | `memory-content` | `GET /v1/memory/{projectId}/content` downloads a project's memory files with their bytes, for pull. |
 | `memory-base-versions` | A pushed memory file may carry `baseVersion`, which is kept as the new version's base. Content downloads carry each file's `history` of versions and bases, and `deletedOn`, the copies that deleted it. |
 | `search` | `GET /v1/search` searches the caller's sessions and memory, with secrets redacted. |
+| `memory-redacted-read` | `GET /v1/memory/{projectId}/content` takes `redacted=true` and returns each file's content with known secrets replaced by markers such as `[redacted:github-token]`; `sha256` and `size` then describe the redacted bytes. |
 
 ## Adding a capability
 

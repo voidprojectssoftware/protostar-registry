@@ -1,8 +1,10 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Projects;
+using Protostar.Registry.Api.Search;
 using Protostar.Registry.Api.Skills;
 
 namespace Protostar.Registry.Api.Memory;
@@ -212,8 +214,15 @@ public sealed class MemoryService
     /// <c>path</c> limits the answer to one file, and <c>version</c> (which needs <c>path</c>) asks for that version
     /// instead of the current one. The current version is <see cref="MemoryFile.Current"/>. Copies are loaded to choose it, and then only the
     /// chosen versions' content, so a file with a long history costs one version's bytes.
+    /// <para>
+    /// With <paramref name="redacted"/>, each file's content is read as UTF-8 text and passed through
+    /// <see cref="SecretRedactor"/>, as search indexes it, and its <c>sha256</c> and <c>size</c> describe the redacted
+    /// bytes served. That is for reading memory as a person or an agent should; a pull needs the stored bytes and
+    /// never asks for it.
+    /// </para>
     /// </remarks>
-    public async Task<MemoryResult<MemoryProjectContent>> GetContentAsync(Guid ownerId, Guid projectId, string? path, int? version, CancellationToken cancellationToken)
+    public async Task<MemoryResult<MemoryProjectContent>> GetContentAsync(
+        Guid ownerId, Guid projectId, string? path, int? version, bool redacted, CancellationToken cancellationToken)
     {
         RelativePath? wanted = null;
         if (path is not null)
@@ -274,8 +283,9 @@ public sealed class MemoryService
                 .Select(c =>
                 {
                     var v = versions[(c.File.Id, c.Number)];
+                    var (content, sha256) = redacted ? Redact(v.Content, v.Sha256) : (v.Content, v.Sha256);
                     return new MemoryFileContent(
-                        c.File.Path.Value, v.Number, v.Sha256.Value, v.Size, v.Content, v.Number == c.Current.Version, c.Current.DeletedEverywhere,
+                        c.File.Path.Value, v.Number, sha256.Value, content.LongLength, content, v.Number == c.Current.Version, c.Current.DeletedEverywhere,
                         v.MachineId, machineNames.GetValueOrDefault(v.MachineId),
                         [.. history[c.File.Id].OrderBy(h => h.Version)],
                         c.File.Copies.Where(k => k.DeletedAt is not null)
@@ -284,6 +294,17 @@ public sealed class MemoryService
                             .ToList());
                 })
                 .ToList()));
+    }
+
+    // The content with known secrets replaced by markers, and its hash; content with none comes back as it was.
+    private static (byte[] Content, Sha256Hash Sha256) Redact(byte[] content, Sha256Hash sha256)
+    {
+        var text = Encoding.UTF8.GetString(content);
+        var redacted = SecretRedactor.Redact(text);
+        if (ReferenceEquals(redacted, text))
+            return (content, sha256);
+        var bytes = Encoding.UTF8.GetBytes(redacted);
+        return (bytes, Sha256Hash.Of(bytes));
     }
 }
 

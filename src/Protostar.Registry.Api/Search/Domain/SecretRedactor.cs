@@ -10,7 +10,7 @@ namespace Protostar.Registry.Api.Search;
 /// pulling need the original bytes, and those are already readable only by their owner. What the registry derives
 /// for people and agents to read (the search index, its snippets, the titles and first prompts listings show)
 /// goes through <see cref="Redact"/> first (registry#18). A transcript read with <c>redacted=true</c> goes through it
-/// too, line by line, by way of <see cref="JsonLineRedactor"/>.
+/// too, line by line, by way of <see cref="JsonLineRedactor"/>, and so is memory content downloaded with <c>redacted=true</c>.
 /// </para>
 /// <para>
 /// The pattern set is curated, not exhaustive: each pattern matches a format with a recognisable shape (a fixed

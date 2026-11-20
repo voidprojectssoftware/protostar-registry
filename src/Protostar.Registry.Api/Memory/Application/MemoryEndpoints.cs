@@ -37,7 +37,9 @@ public static class MemoryEndpoints
         The current version is the one the most recently changed copy that still has the file holds, so a note one
         machine reverted is served as reverted. `deletedOn` lists the copies that deleted the file; `deletedEverywhere`
         is set when no copy still has it, and then the content is what the last copy held. A client bringing memory to
-        a new machine decides what a deletion means for it; the registry never drops the file. `machineId` and
+        a new machine decides what a deletion means for it; the registry never drops the file. With `redacted=true`,
+        each file's content is read as UTF-8 text with known secrets replaced by markers such as `[redacted:github-token]`,
+        and `sha256` and `size` describe the redacted bytes; a pull uses the default, the stored bytes. `machineId` and
         `machineName` name the machine that first sent the version served, so a client can say where a version it
         did not take came from. `history` lists every version of the file with `base`, the version its sender had
         last synced, so a client can tell a version that builds on the one it has from a parallel edit.
@@ -119,12 +121,13 @@ public static class MemoryEndpoints
         [Description("The project, as `GET /v1/memory` shows it.")] Guid projectId,
         [Description("Only this file, by its path in the memory folder.")] string? path,
         [Description("This version of `path` instead of its current one.")] int? version,
+        [Description("`true` to redact known secrets from each file's content, as search does; `false` (the default) for the stored bytes.")] bool? redacted,
         ClaimsPrincipal user, MemoryService service, CancellationToken cancellationToken)
     {
         if (!TryGetOwner(user, out var ownerId))
             return Results.Unauthorized();
 
-        var result = await service.GetContentAsync(ownerId, projectId, path, version, cancellationToken);
+        var result = await service.GetContentAsync(ownerId, projectId, path, version, redacted ?? false, cancellationToken);
         return result.Failure switch
         {
             MemoryFailure.None => Results.Ok(MemoryProjectContentResponse.From(result.Value!)),
