@@ -207,11 +207,15 @@ probes `/health` every 30 seconds.
 ## Checking a deployment
 
 ```bash
-curl -s https://<public host>/v1/meta                              # version
+curl -s https://<public host>/v1/meta                              # version, API majors and capabilities
 curl -s https://<public host>/health                               # Healthy
 curl -s https://<public host>/.well-known/openid-configuration     # issuer and endpoints are https://<public host>/...
 protostar auth login --registry https://<public host>              # GitHub sign-in end to end
 ```
+
+`capabilities` in that answer names the features this build serves (see
+[docs/api/capabilities.md](../api/capabilities.md)). A CLI newer than the registry checks it before using a feature, and
+asks for a registry upgrade when the name it needs is missing: upgrading the image is the fix.
 
 Then restart the API container and run `protostar auth status` (or any command that calls the registry): the
 token from before the restart must still work.

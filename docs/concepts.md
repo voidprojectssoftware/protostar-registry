@@ -44,7 +44,7 @@ redirect** (RFC 8252). In plain terms:
 | `/connect/userinfo` | The identified user behind an access token |
 | `/connect/logout` | End the session |
 | `/.well-known/openid-configuration` | OIDC discovery document |
-| `/v1/meta` | Service version + supported API majors (the compatibility contract) |
+| `/v1/meta` | Service version, supported API majors and capabilities (the compatibility contract) |
 
 :::tip Live API reference
 A running registry serves an interactive API reference (Scalar) at **`/scalar/v1`**
@@ -65,13 +65,19 @@ and `GET /v1/meta` advertises the API majors the running registry supports:
 
 ```bash
 curl -k https://localhost:7443/v1/meta
-# {"service":"protostar-registry","version":"0.1.0-alpha.0.N","apiMajors":[1]}
+# {"service":"protostar-registry","version":"0.1.0-alpha.0.N","apiMajors":[1],"capabilities":["skills",...,"search"]}
 ```
 
 The CLI targets an API major and **checks it on connect**, failing with an upgrade
 hint on a mismatch rather than breaking halfway through a command. A breaking wire
 change bumps the API major (a new `/v2` group); during a transition window the
 registry supports both the current and previous major.
+
+Within a major, features arrive release by release, and a shared registry can lag behind the CLI. So
+`/v1/meta` also lists **capabilities**: a stable name for each feature this build serves (`memory`,
+`search`, ...). The CLI checks for a name before using its feature and asks for a registry upgrade when it
+is missing. Names are only ever added within a major. The list and what each name promises are in
+[Capabilities](./api/capabilities.md).
 
 :::tip Why this matters
 You can ship the registry and the CLI on their own cadences. A user on an older

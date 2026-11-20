@@ -31,7 +31,8 @@ public sealed class RegistryUser
     public HttpClient Http { get; }
 
     /// <summary>Pushes a one-file skill named <paramref name="name"/> whose content differs from every earlier push.</summary>
-    public Task<HttpResponseMessage> PushSkillAsync(string name, int? baseVersion = null)
+    /// <param name="project">The facts of the folder whose project the skill belongs to; <c>null</c> for a global skill.</param>
+    public async Task<HttpResponseMessage> PushSkillAsync(string name, int? baseVersion = null, JsonObject? project = null)
     {
         var manifest = $"---\nname: {name}\ndescription: An acceptance test skill.\n---\nPush {++_pushes} from {Login}, {Guid.NewGuid()}.\n";
         var form = new MultipartFormDataContent();
@@ -40,7 +41,9 @@ public sealed class RegistryUser
         form.Add(file, "files", "SKILL.md");
         if (baseVersion is { } based)
             form.Add(new StringContent(based.ToString()), "baseVersion");
-        return Http.PostAsync("/v1/skills", form);
+        if (project is not null)
+            form.Add(new StringContent(new JsonObject { ["machineId"] = await EnsureMachineAsync(), ["facts"] = project.DeepClone() }.ToJsonString()), "project");
+        return await Http.PostAsync("/v1/skills", form);
     }
 
     /// <summary>Returns the machine this user's backups come from, registering it on first use.</summary>
