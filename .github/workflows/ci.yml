@@ -1,8 +1,8 @@
 name: ci
 
 # Build and test on pull requests and on pushes to non-main branches. Pushes to main are covered
-# by the release-please and edge workflows. The integration tests are database-free, so no service
-# containers are needed here.
+# by the release-please and edge workflows. The acceptance scenarios start their own Postgres and RustFS
+# containers through Testcontainers, on the runner's Docker, so no service containers are declared here.
 on:
   pull_request:
   push:
@@ -26,6 +26,7 @@ jobs:
       - name: Build
         run: dotnet build -c Release
 
+      # Every test project in the solution: the unit tests and the acceptance scenarios (test/Protostar.Registry.Acceptance).
       - name: Test
         run: dotnet test -c Release --no-build
 
