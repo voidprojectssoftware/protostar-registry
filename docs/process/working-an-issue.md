@@ -36,6 +36,17 @@ cd src/Protostar.Registry.AppHost && dotnet run   # Postgres (+ object store) in
 # exercise the endpoints with the CLI or curl; stop the AppHost and the Protostar.Registry.Api process after
 ```
 
+Agents run in parallel, each in its own worktree, and each worktree already has its own database and
+object store. Give each one its own API port too, so nobody queues behind 7443:
+
+- Pick a free port per worktree (`ss -ltn | grep :7543` prints nothing when 7543 is free).
+- Run the stack with it: `PROTOSTAR_API_PORT=7543 dotnet run` in `src/Protostar.Registry.AppHost`.
+  The API URL is printed once it is ready; the dashboard takes free ports of its own.
+- Pass `--registry https://localhost:7543` to the CLI.
+- The GitHub sign-in only works on 7443, the port its OAuth callback names. Use the dev provider
+  (`--provider dev`) on other ports.
+- Never stop a stack you did not start. Find your own processes by your worktree path.
+
 Then exercise the change the way the real user would. Stop anything you started (AppHost, API
 processes) before you finish. Disk on the dev VM is limited: `dotnet clean` your worktree after the
 last build.
