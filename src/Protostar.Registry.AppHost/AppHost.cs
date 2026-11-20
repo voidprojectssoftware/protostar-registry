@@ -1,4 +1,24 @@
-var builder = DistributedApplication.CreateBuilder(args);
+// The API's HTTPS port: 7443, the port the GitHub OAuth app's callback names, unless PROTOSTAR_API_PORT
+// says otherwise. Another port lets a second stack run beside the first (one per worktree, each with its
+// own database and store); only the dev sign-in works there, because GitHub redirects to 7443 alone.
+const int DefaultApiPort = 7443;
+var apiPortSetting = Environment.GetEnvironmentVariable("PROTOSTAR_API_PORT");
+var apiPort = string.IsNullOrEmpty(apiPortSetting) ? DefaultApiPort
+    : int.TryParse(apiPortSetting, out var port) && port is > 0 and <= 65535 ? port
+    : throw new InvalidOperationException($"PROTOSTAR_API_PORT must be a TCP port number (1 to 65535), not '{apiPortSetting}'.");
+
+// The launch profile pins the dashboard and its OTLP and resource-service endpoints to fixed ports too, so a
+// second stack would still collide there. Off the default port, let the OS pick them; the dashboard prints
+// where it landed. Command-line configuration outranks the profile's environment variables.
+string[] appHostArgs = apiPort == DefaultApiPort ? args :
+[
+    .. args,
+    "--ASPNETCORE_URLS=https://127.0.0.1:0",
+    "--ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL=https://127.0.0.1:0",
+    "--ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL=https://127.0.0.1:0",
+];
+
+var builder = DistributedApplication.CreateBuilder(appHostArgs);
 
 // GitHub OAuth app credentials. Defaults live in appsettings.json ("placeholder") so the stack
 // boots out of the box; real values come from user-secrets (Parameters:GitHubClientId/Secret) and
@@ -35,11 +55,25 @@ builder.AddProject<Projects.Protostar_Registry_Api>("api")
     .WithEnvironment("ObjectStore__SecretKey", objectStoreSecretKey)
     // Pin the API to a stable HTTPS port in dev so `--registry` and the GitHub OAuth callback
     // (https://localhost:7443/signin-github) stay the same across runs. Non-proxied = the API binds
-    // 7443 directly with the ASP.NET Core dev cert.
+    // the port directly with the ASP.NET Core dev cert.
     .WithEndpoint("https", endpoint =>
     {
-        endpoint.Port = 7443;
+        endpoint.Port = apiPort;
         endpoint.IsProxied = false;
+    })
+    // Nothing uses the plain HTTP endpoint (OpenIddict refuses HTTP), so let its port float rather than
+    // take the launch profile's fixed 5021, which a second stack would collide on.
+    .WithEndpoint("http", endpoint => endpoint.Port = null)
+    .WithHttpHealthCheck("/health", endpointName: "https")
+    .OnResourceReady((_, _, _) =>
+    {
+        var registry = $"https://localhost:{apiPort}";
+        Console.WriteLine();
+        Console.WriteLine($"  Protostar registry API: {registry}");
+        Console.WriteLine($"  CLI: protostar auth login --registry {registry}" +
+            (apiPort == DefaultApiPort ? string.Empty : " --provider dev   (GitHub sign-in works on 7443 only)"));
+        Console.WriteLine();
+        return Task.CompletedTask;
     })
     .WithEnvironment("GitHub__ClientId", gitHubClientId)
     .WithEnvironment("GitHub__ClientSecret", gitHubClientSecret)
