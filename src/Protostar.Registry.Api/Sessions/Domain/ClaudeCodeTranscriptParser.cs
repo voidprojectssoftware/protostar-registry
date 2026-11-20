@@ -16,6 +16,18 @@ namespace Protostar.Registry.Api.Sessions;
 /// thinking, and harness-injected lines are left out: they are bulky, rarely what someone searches for, and
 /// the likeliest place for pasted data.
 /// </para>
+/// <para>
+/// Skills the session invoked (<see cref="TranscriptFacts.Skills"/>) are recognised two ways. The model invokes one
+/// with the <c>Skill</c> tool: an assistant <c>tool_use</c> block named <c>Skill</c> whose <c>input.skill</c> is the
+/// skill's name (<c>plugin:skill</c> for a plugin's). The user invokes one by typing <c>/name</c>: Claude Code writes a
+/// user line holding <c>&lt;command-name&gt;/name&lt;/command-name&gt;</c>, then, only when the command is a skill, a
+/// harness-injected user line starting <c>Base directory for this skill:</c> with the skill's content. Built-in and
+/// plain custom commands write the first line without the second, so a command counts only when the next user line is
+/// that one; anything else between (an assistant line, another user line) means the command was not a skill. A pair
+/// split across two chunks is not counted; the harness writes both in the same turn, so they arrive together. The
+/// injected line also follows a <c>Skill</c> tool call, but no command is pending then, so a call is never counted twice.
+/// Only names and times are kept, never the arguments.
+/// </para>
 /// </remarks>
 public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
 {
@@ -23,22 +35,28 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
 
     private const int PromptPreviewLength = 200;
 
+    private const string SkillToolName = "Skill";
+    private const string SkillContentPrefix = "Base directory for this skill:";
+    private const string CommandNameOpen = "<command-name>";
+    private const string CommandNameClose = "</command-name>";
+
     public TranscriptFacts Parse(ReadOnlySpan<byte> content)
     {
         var facts = new TranscriptFacts();
         var text = new StringBuilder();
+        var skills = new SkillTally();
         while (!content.IsEmpty)
         {
             var end = content.IndexOf((byte)'\n');
             var line = end < 0 ? content : content[..end];
             content = end < 0 ? [] : content[(end + 1)..];
-            facts = Read(line, facts with { Lines = facts.Lines + 1 }, text);
+            facts = Read(line, facts with { Lines = facts.Lines + 1 }, text, skills);
         }
 
-        return facts with { Text = text.ToString() };
+        return facts with { Text = text.ToString(), Skills = skills.Uses };
     }
 
-    private static TranscriptFacts Read(ReadOnlySpan<byte> line, TranscriptFacts facts, StringBuilder text)
+    private static TranscriptFacts Read(ReadOnlySpan<byte> line, TranscriptFacts facts, StringBuilder text, SkillTally skills)
     {
         if (line.TrimEnd((byte)'\r').Trim((byte)' ').IsEmpty)
             return facts;
@@ -78,10 +96,13 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
 
             if (type == "assistant")
             {
+                skills.Pending = null;
+                CountSkillCalls(root, timestamp, skills);
                 AppendReply(root, text);
                 return facts with { AssistantMessages = facts.AssistantMessages + 1 };
             }
 
+            CountSkillCommand(root, timestamp, skills);
             if (PromptText(root) is not { } prompt)
                 return facts;
 
@@ -171,6 +192,69 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
         }
     }
 
+    // Every Skill tool call in an assistant line, by its input's skill name.
+    private static void CountSkillCalls(JsonElement root, DateTimeOffset? timestamp, SkillTally skills)
+    {
+        if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            return;
+
+        foreach (var block in content.EnumerateArray())
+        {
+            if (String(block, "type") == "tool_use" && String(block, "name") == SkillToolName &&
+                block.TryGetProperty("input", out var input))
+                skills.Count(String(input, "skill"), timestamp);
+        }
+    }
+
+    // A user line either confirms the pending slash command as a skill (it is the skill's injected content) or ends it,
+    // and may start a new one.
+    private static void CountSkillCommand(JsonElement root, DateTimeOffset? timestamp, SkillTally skills)
+    {
+        var first = FirstText(root);
+        if (skills.Pending is { } pending && first is not null && first.StartsWith(SkillContentPrefix, StringComparison.Ordinal))
+        {
+            skills.Count(pending.Name, pending.At);
+            skills.Pending = null;
+            return;
+        }
+
+        skills.Pending = CommandName(first) is { } name ? (name, timestamp) : null;
+    }
+
+    // The first text of a user line, whatever kind of user line it is.
+    private static string? FirstText(JsonElement root)
+    {
+        if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("content", out var content))
+            return null;
+        if (content.ValueKind == JsonValueKind.String)
+            return content.GetString();
+        if (content.ValueKind != JsonValueKind.Array)
+            return null;
+
+        foreach (var block in content.EnumerateArray())
+        {
+            if (String(block, "type") == "text")
+                return String(block, "text");
+        }
+
+        return null;
+    }
+
+    // The command in <command-name>/name</command-name>, without its slash.
+    private static string? CommandName(string? text)
+    {
+        if (text is null)
+            return null;
+        var open = text.IndexOf(CommandNameOpen, StringComparison.Ordinal);
+        if (open < 0)
+            return null;
+        var start = open + CommandNameOpen.Length;
+        var close = text.IndexOf(CommandNameClose, start, StringComparison.Ordinal);
+        return close < 0 ? null : text[start..close];
+    }
+
     private static string? String(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
@@ -180,6 +264,32 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
     {
         var single = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         return single.Length <= PromptPreviewLength ? single : single[..(PromptPreviewLength - 3)] + "...";
+    }
+}
+
+/// <summary>The skills one chunk invoked so far, and the slash command waiting to be confirmed as a skill.</summary>
+internal sealed class SkillTally
+{
+    private readonly List<SkillUse> _uses = [];
+
+    public IReadOnlyList<SkillUse> Uses => _uses;
+
+    public (string Name, DateTimeOffset? At)? Pending { get; set; }
+
+    /// <summary>Counts one invocation of <paramref name="raw"/>, as the harness wrote it, unless it cannot be a skill name.</summary>
+    /// <remarks>
+    /// A leading <c>/</c> is dropped, so <c>/deploy</c> and <c>deploy</c> are one skill. A blank name, one with
+    /// whitespace, or one longer than <see cref="SkillUse.MaxNameLength"/> is not a name any harness writes, and is skipped.
+    /// </remarks>
+    public void Count(string? raw, DateTimeOffset? at)
+    {
+        var name = raw?.Trim().TrimStart('/');
+        if (string.IsNullOrEmpty(name) || name.Length > SkillUse.MaxNameLength || name.Any(char.IsWhiteSpace))
+            return;
+
+        var merged = SkillUse.Merge(_uses, [SkillUse.Once(name, at)]);
+        _uses.Clear();
+        _uses.AddRange(merged);
     }
 }
 

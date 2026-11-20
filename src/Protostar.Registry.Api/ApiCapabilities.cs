@@ -62,6 +62,13 @@ internal static class ApiCapabilities
     public const string TranscriptPrefixLookup = "transcript-prefix-lookup";
 
     /// <summary>
+    /// The skills a transcript used, with a session's subagents' included: <c>GET /v1/transcripts/{harness}/{key}/skills</c>.
+    /// Each has <c>name</c>, <c>uses</c>, <c>firstUsedAt</c>, <c>lastUsedAt</c>, and, when it matched a registry skill,
+    /// <c>skillId</c> and an inferred <c>version</c> (<c>versionInferred</c>); <c>deleted</c> marks a skill since deleted.
+    /// </summary>
+    public const string SessionSkills = "session-skills";
+
+    /// <summary>
     /// A transcript download takes <c>redacted=true</c> and returns the content with known secrets replaced by markers,
     /// every JSON line still JSON.
     /// </summary>
@@ -92,7 +99,7 @@ internal static class ApiCapabilities
     public static IReadOnlyList<string> All { get; } =
     [
         Skills, StaleSkillPush, ProjectSkills, SkillRename, SkillDelete, SkillTombstones,
-        Sessions, TranscriptLookup, TranscriptPrefixLookup, RedactedRead,
+        Sessions, TranscriptLookup, TranscriptPrefixLookup, SessionSkills, RedactedRead,
         Projects,
         Memory, MemoryContent, MemoryBaseVersions,
         Search,

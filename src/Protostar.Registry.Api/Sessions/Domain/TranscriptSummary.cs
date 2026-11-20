@@ -20,8 +20,9 @@ public sealed record TranscriptSummary
     /// Bump it whenever a change to a parser (or to <see cref="Add"/>) would give an existing transcript a different
     /// summary. Summaries of an older version are rebuilt in the background by <c>TranscriptReprocessor</c>. If the
     /// change also alters the text the search index gets, bump <c>SearchEntry.CurrentIndexVersion</c> too.
+    /// <para>Version 2 added <see cref="Skills"/>, so transcripts parsed before it gain the skills they used.</para>
     /// </remarks>
-    public const int CurrentParserVersion = 1;
+    public const int CurrentParserVersion = 2;
 
     /// <summary>The summary of a transcript with no lines yet, at <see cref="CurrentParserVersion"/>.</summary>
     public static readonly TranscriptSummary Empty = new() { ParserVersion = CurrentParserVersion };
@@ -63,6 +64,10 @@ public sealed record TranscriptSummary
     /// <summary>Lines that were not valid JSON.</summary>
     public int MalformedLines { get; init; }
 
+    /// <summary>The distinct skills the transcript invoked, in the order first seen; empty when none (or before version 2).</summary>
+    /// <remarks>This transcript's own invocations only: a session's subagents keep theirs, and a read adds them up.</remarks>
+    public IReadOnlyList<SkillUse> Skills { get; init; } = [];
+
     /// <summary>Folds the facts from one more chunk into this summary.</summary>
     public TranscriptSummary Add(TranscriptFacts facts) => this with
     {
@@ -77,6 +82,7 @@ public sealed record TranscriptSummary
         AssistantMessages = AssistantMessages + facts.AssistantMessages,
         Lines = Lines + facts.Lines,
         MalformedLines = MalformedLines + facts.MalformedLines,
+        Skills = SkillUse.Merge(Skills, facts.Skills),
     };
 
     private static DateTimeOffset? Earliest(DateTimeOffset? a, DateTimeOffset? b) => a is null ? b : b is null ? a : a < b ? a : b;
@@ -98,6 +104,9 @@ public sealed record TranscriptFacts
     public int AssistantMessages { get; init; }
     public int Lines { get; init; }
     public int MalformedLines { get; init; }
+
+    /// <summary>The distinct skills the chunk's lines invoked.</summary>
+    public IReadOnlyList<SkillUse> Skills { get; init; } = [];
 
     /// <summary>The chunk's readable text for the search index, one message per line, not redacted; <c>null</c> when the parser extracts none.</summary>
     /// <remarks>Not folded into <see cref="TranscriptSummary"/>: it goes to the index with the chunk and is not kept on the transcript.</remarks>

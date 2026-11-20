@@ -7,6 +7,7 @@ using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Projects;
 using Protostar.Registry.Api.Search;
+using Protostar.Registry.Api.Skills;
 
 namespace Protostar.Registry.Api.Sessions;
 
@@ -335,6 +336,48 @@ public sealed class TranscriptService
 
         var views = await ToViewsAsync(ownerId, [transcript, .. subagents], cancellationToken);
         return TranscriptResult<(TranscriptView, IReadOnlyList<TranscriptView>)>.Ok((views[0], views.Skip(1).ToList()));
+    }
+
+    /// <summary>The skills a transcript used, matched to the caller's registry skills; for a session, its subagents' too.</summary>
+    /// <remarks>
+    /// A session's list adds up its own invocations and every one of its subagents', matched in the session's project
+    /// (<see cref="SessionSkills"/>). A subagent's list is its own, matched in its own project. Only the caller's own
+    /// transcripts, skills and removed names are read.
+    /// </remarks>
+    public async Task<TranscriptResult<(Transcript Transcript, IReadOnlyList<SessionSkill> Skills)>> GetSkillsAsync(
+        Guid ownerId, string harnessRaw, string keyRaw, CancellationToken cancellationToken)
+    {
+        if (!HarnessId.TryCreate(harnessRaw, out var harness) || !TranscriptKey.TryCreate(keyRaw, out var key))
+            return TranscriptResult<(Transcript, IReadOnlyList<SessionSkill>)>.NotFound();
+
+        var transcript = await _db.Transcripts.AsNoTracking()
+            .FirstOrDefaultAsync(t => t.OwnerId == ownerId && t.Harness == harness && t.Key == key, cancellationToken);
+        if (transcript is null)
+            return TranscriptResult<(Transcript, IReadOnlyList<SessionSkill>)>.NotFound();
+
+        var uses = transcript.Summary.Skills;
+        if (transcript.Kind == TranscriptKind.Session)
+        {
+            var subagentUses = await _db.Transcripts.AsNoTracking()
+                .Where(t => t.OwnerId == ownerId && t.Harness == harness && t.ParentKey == key)
+                .Select(t => t.Summary.Skills)
+                .ToListAsync(cancellationToken);
+            uses = subagentUses.Aggregate(uses, SkillUse.Merge);
+        }
+
+        var names = uses.Select(u => u.Name).Where(n => !SessionSkills.IsPluginSkill(n)).ToList();
+        var projectId = transcript.ProjectId;
+        var tombstones = names.Count == 0 ? [] : await _db.SkillTombstones.AsNoTracking()
+            .Where(t => t.CreatorId == ownerId && (t.ProjectId == null || t.ProjectId == projectId) && names.Contains(t.Name))
+            .ToListAsync(cancellationToken);
+        var candidates = names.Concat(tombstones.Where(t => t.RenamedTo != null).Select(t => t.RenamedTo!)).Distinct().ToList();
+        var skills = candidates.Count == 0 ? [] : await _db.Skills.AsNoTracking()
+            .Include(s => s.Versions)
+            .Where(s => s.CreatorId == ownerId && (s.ProjectId == null || s.ProjectId == projectId) && candidates.Contains(s.Name))
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
+        return TranscriptResult<(Transcript, IReadOnlyList<SessionSkill>)>.Ok((transcript, SessionSkills.Match(uses, projectId, skills, tombstones)));
     }
 
     /// <summary>Finds a transcript and the chunks of its current revision, in order, for download.</summary>
