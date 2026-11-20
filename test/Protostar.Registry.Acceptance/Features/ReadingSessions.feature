@@ -23,3 +23,10 @@ Feature: Reading a session never shows a secret's value
   Scenario: The default read is the upload, byte for byte
     When alice downloads the session
     Then what she reads is byte-identical to what she uploaded
+
+  Scenario: A redacted read hides secrets nested in strings, multi-word values, and the other shapes agents write
+    Given alice has backed up a session with a password in a curl body, an API key in code, a passphrase, a password with a semicolon, a Kubernetes secret, a bearer token and a GitHub token followed by an underscore
+    When alice reads the session redacted
+    Then every line of what she reads is valid JSON
+    And what she reads shows "[redacted:secret]", "[redacted:bearer-token]" and "[redacted:github-token]"
+    And what she reads contains none of the secrets

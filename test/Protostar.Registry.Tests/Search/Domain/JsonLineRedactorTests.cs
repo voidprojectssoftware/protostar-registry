@@ -121,6 +121,77 @@ public sealed class JsonLineRedactorTests
         Assert.Equal($$"""{"password":"[redacted:secret]","db_password": "[redacted:secret]","note":"{{Password}}"}""", redacted);
     }
 
+    // registry#78, the issue's repros: JSON in a Bash command and in code, nested inside another string.
+    [Fact]
+    public void A_password_in_a_curl_body_inside_a_bash_command_is_replaced()
+    {
+        var line = """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"curl -X POST -d \"{\\\"password\\\":\\\"hunter2-supersecret\\\"}\" https://x"}}]}}""";
+
+        var redacted = RedactLine(line);
+
+        AssertNoSecrets(redacted);
+        var command = JsonNode.Parse(redacted)!["message"]!["content"]![0]!["input"]!["command"]!.GetValue<string>();
+        Assert.Equal("curl -X POST -d \"{\\\"password\\\":\\\"[redacted:secret]\\\"}\" https://x", command);
+    }
+
+    [Fact]
+    public void An_api_key_in_a_json_literal_in_code_is_replaced()
+    {
+        var line = """{"new_string":"var body = \"{\\\"api_key\\\": \\\"abcd1234efgh5678\\\"}\";"}""";
+
+        var redacted = RedactLine(line);
+
+        Assert.Equal("""{"new_string":"var body = \"{\\\"api_key\\\": \\\"[redacted:secret]\\\"}\";"}""", redacted);
+    }
+
+    [Fact]
+    public void An_escaped_password_on_a_line_that_is_not_json_is_replaced() =>
+        Assert.Equal("not json \\\"password\\\": \\\"[redacted:secret]\\\"", RedactLine("not json \\\"password\\\": \\\"hunter2-supersecret\\\""));
+
+    [Fact]
+    public void A_password_behind_two_levels_of_json_in_a_string_is_replaced()
+    {
+        var inner = new JsonObject { ["password"] = Password }.ToJsonString();
+        var middle = new JsonObject { ["body"] = $"curl -d '{inner}'" }.ToJsonString(Relaxed);
+        var line = new JsonObject { ["content"] = $"ran: {middle}" }.ToJsonString(Relaxed);
+
+        var redacted = RedactLine(line);
+
+        AssertNoSecrets(redacted);
+        Assert.Contains("[redacted:secret]", redacted);
+        JsonDocument.Parse(redacted).Dispose();
+    }
+
+    // registry#79, the issue's repros: a value under a secret name is replaced whole.
+    [Theory]
+    [InlineData("""{"password":"correct horse battery staple"}""", """{"password":"[redacted:secret]"}""")]
+    [InlineData("""{"password":"p4ss;w0rd-tail"}""", """{"password":"[redacted:secret]"}""")]
+    [InlineData("""{"api_key":"it's, \"quoted\"; long"}""", """{"api_key":"[redacted:secret]"}""")]
+    [InlineData("""{"password":" hunter2-supersecret"}""", """{"password":"[redacted:secret]"}""")]
+    [InlineData("""{"password":"abc"}""", """{"password":"abc"}""")]
+    [InlineData("""{"max_tokens":"4096 tokens"}""", """{"max_tokens":"4096 tokens"}""")]
+    public void A_value_under_a_secret_name_is_replaced_whole(string line, string expected) =>
+        Assert.Equal(expected, RedactLine(line));
+
+    [Fact]
+    public void A_value_under_a_secret_name_keeps_a_more_specific_type()
+    {
+        var awsSecret = "wJalrXUtnFEMI/K7MDENG+bPxRfiCY" + "EXAMPLEKEY";
+        var line = $$"""{"aws_secret_access_key":"{{awsSecret}}","token":"{{GitHubToken}}"}""";
+
+        Assert.Equal("""{"aws_secret_access_key":"[redacted:aws-secret-key]","token":"[redacted:github-token]"}""", RedactLine(line));
+    }
+
+    [Fact]
+    public void The_value_of_a_name_value_pair_naming_a_secret_is_replaced()
+    {
+        var line = """{"env":[{"name":"DB_PASSWORD","value":"s3cr3t value"},{"name":"LOG_LEVEL","value":"debug info"},{"key":"API_TOKEN","value":"abcd1234efgh"}]}""";
+
+        Assert.Equal(
+            """{"env":[{"name":"DB_PASSWORD","value":"[redacted:secret]"},{"name":"LOG_LEVEL","value":"debug info"},{"key":"API_TOKEN","value":"[redacted:secret]"}]}""",
+            RedactLine(line));
+    }
+
     [Fact]
     public void Property_names_are_left_alone()
     {
@@ -160,7 +231,11 @@ public sealed class JsonLineRedactorTests
     public void Random_shapes_holding_secrets_stay_valid_json_and_lose_every_secret()
     {
         var random = new Random(18);
-        string[] secrets = [GitHubToken, AwsKey, $"password={Password}", $"\"password\": \"{Password}\""];
+        string[] secrets =
+        [
+            GitHubToken, AwsKey, $"password={Password}", $"\"password\": \"{Password}\"", $"password: \"correct horse {Password}\"",
+            $"curl -d \"{{\\\"password\\\":\\\"{Password}\\\"}}\"", $"{{\"name\": \"DB_PASSWORD\", \"value\": \"a b {Password}\"}}",
+        ];
         string[] filler = ["plain words", "café ☃", "a \"quote\"", "back\\slash", "new\nline", "<html>&amp;", ""];
 
         string Text() => string.Join(' ', Enumerable.Range(0, random.Next(1, 4))

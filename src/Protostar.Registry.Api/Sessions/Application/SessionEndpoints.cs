@@ -51,7 +51,9 @@ public static class SessionEndpoints
         verification rely on. Pass `redacted=true` to read it as a person or an agent should: each line has
         known secrets (tokens, keys, passwords) replaced by a marker such as `[redacted:github-token]`, the
         same redaction search applies. Secrets are redacted inside JSON string values, so every line that was
-        JSON is still JSON; a line with nothing to redact is unchanged, byte for byte.
+        JSON is still JSON; a line with nothing to redact is unchanged, byte for byte. A value under a name that
+        says it is secret (`password`, `api_key`, ...) is replaced whole, and a string the redactor cannot finish
+        scanning in time is replaced whole by `[redacted:unscannable]` rather than served as it was.
         """;
 
     private const string UnknownMachineResponse =
