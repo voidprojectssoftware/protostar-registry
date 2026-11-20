@@ -217,7 +217,7 @@ if (app.Environment.IsDevelopment())
     // API docs: the raw OpenAPI document and an interactive Scalar reference (Swagger-UI successor).
     // The OAuth flow lets you sign in from the UI and call the protected skill endpoints with a token.
     app.MapOpenApi();
-    app.MapScalarApiReference(options =>
+    app.MapScalarApiReference((options, context) =>
     {
         options.WithTitle("protostar registry API")
             .AddPreferredSecuritySchemes(OAuthSecuritySchemeTransformer.SchemeId)
@@ -226,8 +226,10 @@ if (app.Environment.IsDevelopment())
                 flow.ClientId = ScalarUiClientSeeder.ClientId;
                 flow.Pkce = Pkce.Sha256;
                 flow.SelectedScopes = ["openid", "profile", "email", "registry"];
-                // Pin the redirect to the reference page; some Scalar versions otherwise send the origin.
-                flow.RedirectUri = "https://localhost:7443/scalar/v1";
+                // Pin the redirect to the reference page on whatever port this stack runs on (7443 unless
+                // PROTOSTAR_API_PORT moved it); some Scalar versions otherwise send the origin.
+                var request = context.Request;
+                flow.RedirectUri = $"{request.Scheme}://{request.Host}{request.PathBase}/scalar/v1";
             });
     });
 }

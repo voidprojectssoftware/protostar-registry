@@ -78,6 +78,12 @@ dashboard you will see two resources, `postgres` and `api`. The API:
 > The dashboard runs on its own port (e.g. `https://localhost:17254`). That is **not** the API — point
 > clients at the `api` resource URL (`https://localhost:7443`), not the dashboard.
 
+To run a second stack beside the first (another checkout or worktree), give it another port:
+`PROTOSTAR_API_PORT=7543 dotnet run --project src/Protostar.Registry.AppHost`. Its dashboard then takes
+free ports instead of 17254, and the API URL is printed once it is ready. Point the CLI at it with
+`--registry https://localhost:7543` and sign in with `--provider dev`: the GitHub callback names 7443,
+so GitHub sign-in works only there.
+
 :::info 📷 Screenshot slot — `img/aspire-dashboard.png`
 The Aspire dashboard on first run, showing the `postgres` and `api` resources and
 the named API links. Drop the image into `docs/img/` and replace this admonition
