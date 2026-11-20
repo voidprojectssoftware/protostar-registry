@@ -33,7 +33,10 @@ internal sealed class RegistryDocumentTransformer : IOpenApiDocumentTransformer
                 ## Compatibility
 
                 Versioned endpoints live under `/v1`. `GET /v1/meta` lists the API majors this build serves; clients
-                check it before anything else and stop with an upgrade hint when theirs is missing.
+                check it before anything else and stop with an upgrade hint when theirs is missing. Its `capabilities` names
+                the features added within the major that this build serves (for example `memory` or `search`); a client
+                checks for a name before using its feature, so an older registry is met with an upgrade hint rather than
+                a 404. A name is never removed within v1.
 
                 ## Errors
 

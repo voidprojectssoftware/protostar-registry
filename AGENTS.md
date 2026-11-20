@@ -131,6 +131,18 @@ Skills/
 - **Ubiquitous language.** Use the domain's words in code (push, skill, version, creator). "Creator" is
   provenance, not an ownership or permissions grant.
 
+## API capabilities
+
+`GET /v1/meta` lists `capabilities`: stable kebab-case names for the features added within API v1, defined in
+`src/Protostar.Registry.Api/ApiCapabilities.cs` and listed in `docs/api/capabilities.md`. The rule:
+
+- **A name is added in the same PR that ships its feature.** A feature a client could branch on (a new endpoint,
+  a new request field, a new refusal it should handle) gets a name; a fix to an existing feature does not.
+- **A name is never removed or renamed within v1.** Removing a feature is a breaking change and a new API major.
+- Adding one means: the `const` with a doc comment saying what a client may rely on, `ApiCapabilities.All`, the
+  table in `docs/api/capabilities.md`, both tables in `Capabilities.feature`, and a check that uses the feature in
+  `CapabilitySteps`.
+
 ## C# conventions
 
 - **No em dashes** in any output: code, comments, commit messages, docs. Restructure the sentence instead.

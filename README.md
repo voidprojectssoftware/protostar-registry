@@ -36,7 +36,7 @@ user so their synced skills are tagged to them.
 | `/connect/userinfo` | The identified user behind an access token |
 | `/connect/logout` | End the session |
 | `/.well-known/openid-configuration` | OIDC discovery document |
-| `/v1/meta` | Service version + supported API majors (the compatibility contract) |
+| `/v1/meta` | Service version, supported API majors and capabilities (the compatibility contract) |
 
 ## Versioning and CLI compatibility
 
@@ -49,6 +49,9 @@ Compatibility is instead an **API contract**: the HTTP API is served under `/v1`
 (`{ "apiMajors": [1] }`). The CLI targets an API major and checks it on connect, failing
 with an upgrade hint on mismatch. A breaking wire change bumps the API major (a new `/v2`
 group); the registry supports the current and previous major during a transition window.
+Within a major, `/v1/meta` also lists `capabilities`, names for the features this build serves, so a newer
+CLI can ask for a registry upgrade instead of failing on a 404 (see
+[docs/api/capabilities.md](docs/api/capabilities.md)).
 
 ## Local development
 

@@ -262,12 +262,17 @@ app.MapProjectEndpoints();
 app.MapMemoryEndpoints();
 app.MapSearchEndpoints();
 
-// API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
-app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors))
+// API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility, and `capabilities` before
+// using a feature added within the major.
+app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors, ApiCapabilities.All))
     .WithName("GetMeta")
     .WithTags(ApiTags.Meta)
     .WithSummary("Registry identity and API-compatibility surface")
-    .WithDescription("Public. Clients call this first and stop with an upgrade hint when their API major is not listed.")
+    .WithDescription(
+        "Public. Clients call this first and stop with an upgrade hint when their API major is not listed. `capabilities` " +
+        "names the features this build serves within that major: " + string.Join(", ", ApiCapabilities.All.Select(c => $"`{c}`")) +
+        ". A client checks for a name before using its feature and asks for a registry upgrade when it is missing. Names " +
+        "are added in the release that ships their feature and never removed within v1.")
     .Produces<ApiMeta>();
 
 app.Run();

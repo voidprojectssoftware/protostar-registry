@@ -26,8 +26,14 @@ internal static class ApiInfo
 
 /// <summary>The registry's identity and API-compatibility surface, returned by <c>/v1/meta</c>.</summary>
 /// <remarks>
-/// <c>ApiMajors</c> lists the API major versions this build serves; the CLI checks it on connect to
-/// decide compatibility. Serialized with the default camelCase policy (<c>service</c>, <c>version</c>,
-/// <c>apiMajors</c>).
+/// Serialized with the default camelCase policy (<c>service</c>, <c>version</c>, <c>apiMajors</c>, <c>capabilities</c>).
 /// </remarks>
-public sealed record ApiMeta(string Service, string Version, int[] ApiMajors);
+/// <param name="Service">Always <c>protostar-registry</c>.</param>
+/// <param name="Version">The registry build's version.</param>
+/// <param name="ApiMajors">The API major versions this build serves. A client whose major is not listed stops with an upgrade hint.</param>
+/// <param name="Capabilities">
+/// The features this build serves within the API major, as stable kebab-case names (see <c>docs/api/capabilities.md</c>).
+/// A client checks for a name before using its feature, and treats a missing name as "upgrade the registry". Names are
+/// only ever added within v1, never removed.
+/// </param>
+public sealed record ApiMeta(string Service, string Version, int[] ApiMajors, IReadOnlyList<string> Capabilities);
