@@ -95,6 +95,12 @@ internal static class ApiCapabilities
     /// <summary>Full-text search over the caller's sessions and memory, with secrets redacted: <c>GET /v1/search</c>.</summary>
     public const string Search = "search";
 
+    /// <summary>
+    /// A memory content download takes <c>redacted=true</c> and returns each file's content with known secrets replaced
+    /// by markers, for reading memory as a person or an agent should.
+    /// </summary>
+    public const string MemoryRedactedRead = "memory-redacted-read";
+
     /// <summary>Every capability this build serves, in the order <c>/v1/meta</c> lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -103,5 +109,6 @@ internal static class ApiCapabilities
         Projects,
         Memory, MemoryContent, MemoryBaseVersions,
         Search,
+        MemoryRedactedRead,
     ];
 }

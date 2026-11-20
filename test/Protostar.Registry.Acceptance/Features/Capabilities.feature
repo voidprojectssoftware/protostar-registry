@@ -30,6 +30,7 @@ Feature: The registry says which features it serves
       | memory-content           |
       | memory-base-versions     |
       | search                   |
+      | memory-redacted-read     |
     And every capability the meta lists has a check of its feature
 
   Scenario Outline: The feature behind each listed capability works
@@ -56,3 +57,4 @@ Feature: The registry says which features it serves
       | memory-content           |
       | memory-base-versions     |
       | search                   |
+      | memory-redacted-read     |
