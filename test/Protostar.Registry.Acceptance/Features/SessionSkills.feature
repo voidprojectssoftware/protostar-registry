@@ -5,8 +5,10 @@ Feature: See which skills a session used
 
   The registry picks skill invocations out of a Claude Code transcript as it parses it (registry#14): the model's
   Skill tool calls, and the user's slash commands that load a skill. A transcript records only the name, so a
-  matched skill's version is inferred: the newest version pushed at or before the session last used it. Times in
-  these scenarios are real: a skill is pushed, then the session uses it "now", then a later version is pushed.
+  matched skill's version is inferred: the newest version pushed no later than two minutes after the session last
+  used it. The two minutes allow for the CLI's capture hook, which backs a skill up just after it is used (registry#81).
+  Times in these scenarios are real: a skill is pushed, then the session uses it "now". A push "an hour after the
+  session" is dated an hour on, standing for a later edit.
 
   Background:
     Given a running registry
@@ -15,7 +17,7 @@ Feature: See which skills a session used
   Scenario: Each skill a session used is listed with the version in force when it was used
     Given alice has pushed the skills "deploy" and "review"
     And alice has backed up a session that used "deploy" twice and "review" once, passing arguments "SECRET-ARGS"
-    And alice has since pushed a second version of "deploy"
+    And an hour after the session, alice pushed a second version of "deploy"
     When alice asks which skills the session used
     Then the session used "deploy" 2 times, matched to her skill at inferred version 1
     And the session used "review" 1 time, matched to her skill at inferred version 1
@@ -42,9 +44,22 @@ Feature: See which skills a session used
     When alice asks which skills the session used
     Then the session used "deploy" 1 time, deleted from the registry
 
+  Scenario: A skill edited then used is the version the capture hook pushed just after the use
+    Given alice has pushed the skills "deploy" and "review"
+    And alice has backed up a session that used "deploy"
+    And the capture hook pushed her edited "deploy" as version 2 just after the use
+    When alice asks which skills the session used
+    Then the session used "deploy" 1 time, matched to her skill at inferred version 2
+
+  Scenario: A skill used for the first time is version 1 once the capture hook pushes it
+    Given alice has backed up a session that used "deploy"
+    And the capture hook pushed "deploy" as version 1 just after the use
+    When alice asks which skills the session used
+    Then the session used "deploy" 1 time, matched to her skill at inferred version 1
+
   Scenario: A skill used before it was ever pushed has no version
     Given alice has backed up a session that used "deploy"
-    And alice has pushed the skills "deploy" and "review"
+    And an hour after the session, alice pushed the skills "deploy" and "review"
     When alice asks which skills the session used
     Then the session used "deploy" 1 time, matched to her skill with no version
 

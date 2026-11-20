@@ -13,7 +13,8 @@ namespace Protostar.Registry.Acceptance.Steps;
 /// <remarks>
 /// Sessions are written as the Claude Code JSONL lines the parser reads: an assistant <c>tool_use</c> of the
 /// <c>Skill</c> tool, or the user's slash command followed by the skill's injected content. Every use is stamped with
-/// the time the step runs, so a version pushed before the step counts and one pushed after does not.
+/// the time the step runs, so a version pushed before the step counts, as does one the capture hook pushes just after
+/// it; a later edit is dated an hour on, past the grace.
 /// </remarks>
 [Binding]
 public sealed class SessionSkillSteps
@@ -43,9 +44,28 @@ public sealed class SessionSkillSteps
         _skillIds[second] = await PushAsync(second);
     }
 
-    [Given("alice has since pushed a second version of {string}")]
-    public async Task GivenAliceHasPushedASecondVersion(string name) =>
+    [Given("an hour after the session, alice pushed a second version of {string}")]
+    public async Task GivenAliceLaterPushedASecondVersion(string name)
+    {
         Assert.Equal(2, (await PushedAsync(Alice.PushSkillAsync(name)))["version"]!.GetValue<int>());
+        await DateVersionsAnHourOnAsync(_skillIds[name], version: 2);
+    }
+
+    [Given("an hour after the session, alice pushed the skills {string} and {string}")]
+    public async Task GivenAliceLaterPushedTheSkills(string first, string second)
+    {
+        await GivenAliceHasPushedTheSkills(first, second);
+        await DateVersionsAnHourOnAsync(_skillIds[first], version: 1);
+        await DateVersionsAnHourOnAsync(_skillIds[second], version: 1);
+    }
+
+    [Given(@"^the capture hook pushed (?:her edited )?""(.*)"" as version (\d+) just after the use$")]
+    public async Task GivenTheCaptureHookPushed(string name, int version)
+    {
+        var pushed = await PushedAsync(Alice.PushSkillAsync(name));
+        Assert.Equal(version, pushed["version"]!.GetValue<int>());
+        _skillIds[name] = pushed["skillId"]!.GetValue<Guid>();
+    }
 
     [Given("alice has since deleted the skill {string}")]
     public async Task GivenAliceHasDeletedTheSkill(string name) =>
@@ -213,6 +233,20 @@ public sealed class SessionSkillSteps
         Assert.Equal(uses, used["uses"]!.GetValue<int>());
         Assert.NotNull(used["firstUsedAt"]);
         return used;
+    }
+
+    // The registry dates a version by its own clock, so a push meant to come well after the session (a later edit,
+    // outside the capture hook's grace) is moved an hour on rather than waited for.
+    private async Task DateVersionsAnHourOnAsync(Guid skillId, int version)
+    {
+        await using var connection = new NpgsqlConnection(RegistryInfrastructure.ConnectionString(_scenario.Database));
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            """UPDATE "SkillVersions" SET "CreatedAt" = "CreatedAt" + interval '1 hour' WHERE "SkillId" = @skill AND "VersionNumber" = @version""",
+            connection);
+        command.Parameters.AddWithValue("skill", skillId);
+        command.Parameters.AddWithValue("version", version);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
     }
 
     private async Task<Guid> PushAsync(string name) => (await PushedAsync(Alice.PushSkillAsync(name)))["skillId"]!.GetValue<Guid>();
