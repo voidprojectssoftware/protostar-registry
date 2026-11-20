@@ -131,7 +131,9 @@ public sealed class TranscriptService
     /// <summary>Appends one chunk to a registered transcript.</summary>
     /// <remarks>
     /// <c>body</c> is the chunk, gzip-compressed when <c>gzip</c> is true. When <c>expectedSha256</c> is given,
-    /// the uncompressed chunk must hash to it.
+    /// the uncompressed chunk must hash to it. Only another append moving the position fails it as a mismatch; an
+    /// update that leaves the position alone (a rebuilt summary from <see cref="TranscriptReprocessor"/>, a refiling)
+    /// is retried against the updated row, so the chunk is never lost to it.
     /// </remarks>
     public async Task<TranscriptResult<Transcript>> AppendAsync(
         Guid ownerId, string harnessRaw, string keyRaw, int revision, long offset, Guid machineId,
@@ -175,31 +177,51 @@ public sealed class TranscriptService
 
         var blobKey = $"{TranscriptChunk.BlobKeyPrefix}{ownerId:N}/{transcript.Id:N}/r{revision}/{offset:D16}-{Guid.NewGuid():N}.jsonl.gz";
         var now = DateTimeOffset.UtcNow;
-        var outcome = transcript.Append(revision, offset, raw, blobKey, stored.Length, machineId, TranscriptParsers.For(harness), now);
+        var parser = TranscriptParsers.For(harness);
+        var outcome = transcript.Append(revision, offset, raw, blobKey, stored.Length, machineId, parser, now);
         if (outcome.Expected is not null)
             return TranscriptResult<Transcript>.Mismatch(transcript);
         if (outcome.Error is { } error)
             return TranscriptResult<Transcript>.Invalid(error);
 
         await _blobs.PutAsync(blobKey, stored, cancellationToken);
-        _db.TranscriptChunks.Add(outcome.Chunk!);
-        machine.Seen(now);
+        for (var attempt = 1; ; attempt++)
+        {
+            _db.TranscriptChunks.Add(outcome.Chunk!);
+            machine.Seen(now);
 
-        try
-        {
-            await _db.SaveChangesRacingAndDispatchAsync(_events, cancellationToken);
-        }
-        catch (Exception ex) when (ex is DbUpdateConcurrencyException || ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        {
-            // Another append to the same transcript won the race; report where it left things.
-            _db.ChangeTracker.Clear();
-            var current = await FindAsync(ownerId, harness, key, cancellationToken);
-            return TranscriptResult<Transcript>.Mismatch(current!);
+            try
+            {
+                await _db.SaveChangesRacingAndDispatchAsync(_events, cancellationToken);
+                break;
+            }
+            catch (Exception ex) when (ex is DbUpdateConcurrencyException || ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            {
+                _db.ChangeTracker.Clear();
+                var current = (await FindAsync(ownerId, harness, key, cancellationToken))!;
+
+                // The row changed but the chunk is still in position, so no append got in first: another writer (the
+                // reprocessor saving a rebuilt summary, a refiling) updated it. Apply the chunk to the row as it is now.
+                if (ex is DbUpdateConcurrencyException && attempt < MaxAppendAttempts && current.AcceptsChunkAt(revision, offset) &&
+                    await FindMachineAsync(ownerId, machineId, cancellationToken) is { } reloaded)
+                {
+                    (transcript, machine) = (current, reloaded);
+                    outcome = transcript.Append(revision, offset, raw, blobKey, stored.Length, machineId, parser, now);
+                    continue;
+                }
+
+                // Another append to the same transcript won the race; report where it left things.
+                return TranscriptResult<Transcript>.Mismatch(current);
+            }
         }
 
         await FileByWorkingDirectoryAsync(transcript, cancellationToken);
         return TranscriptResult<Transcript>.Ok(transcript);
     }
+
+    // How many times an append is saved when only a non-append update gets in its way. One retry is what a
+    // reprocessed summary needs; a few more cover refilings landing at the same moment, without looping forever.
+    private const int MaxAppendAttempts = 4;
 
     // A transcript the client sent no facts for is filed by the working directory its lines recorded, once
     // they have recorded one, as a machine-and-folder project. Runs after the caller's save, because resolving

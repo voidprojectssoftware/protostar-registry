@@ -59,6 +59,20 @@ ASP.NET Core maps `__` in a variable name to a configuration section (`ObjectSto
 | `ObjectStore__OrphanSweepInterval` | no (default `06:00:00`) | How often the sweep runs. | `06:00:00` |
 | `ObjectStore__OrphanSweepGrace` | no (default `1.00:00:00`) | How old an unreferenced blob must be before it is deleted. | `1.00:00:00` |
 
+### Reprocessing
+
+When a release improves how the registry reads sessions (a parser or redaction fix), stored sessions are reread
+from the object store so listings, reads and search improve without anyone re-uploading or upgrading the CLI. A
+pass runs at startup and then hourly; a pass with nothing to do is a few cheap queries. To run one on demand and
+exit, without serving: `dotnet Protostar.Registry.Api.dll reparse-sessions` (`reindex-search` is the same pass).
+
+| Variable | Required | Meaning | Example |
+|---|---|---|---|
+| `Reprocessing__Enabled` | no (default `true`) | Whether this instance runs the pass in the background. Leave on. | `true` |
+| `Reprocessing__Interval` | no (default `01:00:00`) | Time between passes. | `01:00:00` |
+| `Reprocessing__BatchSize` | no (default `20`) | Transcripts per batch. Memory does not depend on it: one chunk (at most 16 MiB) is read at a time. | `20` |
+| `Reprocessing__BatchPause` | no (default `00:00:02`) | Pause after each full batch, so a large backlog does not hold the database and store continuously. | `00:00:02` |
+
 ### GitHub sign-in
 
 | Variable | Required | Meaning | Example |
@@ -162,7 +176,7 @@ redirected to `127.0.0.1` on the user's own machine, which the proxy never sees.
 ## Migrations
 
 **The registry applies pending EF Core migrations at startup**, in every environment, before it starts serving
-or runs its background services, so the client seeder and the orphan sweep always see the current schema. There
+or runs its background services, so the client seeder, the orphan sweep and reprocessing always see the current schema. There
 is no separate migration step to forget, and an image upgrade migrates itself.
 
 It is safe with one instance, which is how the registry runs: nothing else writes the schema. It is also safe if

@@ -138,15 +138,27 @@ builder.Services.AddScoped<IDomainEventHandler<ProjectRemoteAttached>, RefileSha
 builder.Services.AddScoped<IDomainEventHandler<FolderLinkChanged>, RefileLinkedFolder>();
 
 // Search: an owner-scoped Postgres full-text index over redacted session and memory text, kept current by
-// domain event handlers as content arrives, and filled in for older content by a background backfill (not in the
-// database-free test host).
+// domain event handlers as content arrives.
 builder.Services.AddScoped<SearchService>();
 builder.Services.AddScoped<SearchIndexer>();
-builder.Services.AddScoped<SearchBackfill>();
 builder.Services.AddScoped<IDomainEventHandler<TranscriptChunkAppended>, IndexAppendedChunk>();
 builder.Services.AddScoped<IDomainEventHandler<MemoryFileChanged>, IndexChangedMemoryFile>();
-if (!builder.Environment.IsEnvironment("Testing"))
-    builder.Services.AddHostedService<SearchBackfillService>();
+
+// Reprocessing: one pass that rebuilds what an older registry derived from stored content (transcript summaries below
+// TranscriptSummary.CurrentParserVersion, search entries below SearchEntry.CurrentIndexVersion), at startup and then
+// hourly, unless Reprocessing:Enabled is false. Not in the database-free test host.
+builder.Services.AddOptions<ReprocessingOptions>()
+    .Bind(builder.Configuration.GetSection(ReprocessingOptions.Section))
+    .Validate(o => o.Interval > TimeSpan.Zero && o.BatchSize > 0 && o.BatchPause >= TimeSpan.Zero,
+        "Reprocessing:Interval and Reprocessing:BatchSize must be positive and Reprocessing:BatchPause must not be negative.")
+    .ValidateOnStart();
+builder.Services.AddScoped<TranscriptReprocessor>();
+builder.Services.AddScoped<SearchBackfill>();
+if (!builder.Environment.IsEnvironment("Testing") &&
+    builder.Configuration.GetValue(ReprocessingOptions.Section + ":" + nameof(ReprocessingOptions.Enabled), true))
+{
+    builder.Services.AddHostedService<ReprocessingService>();
+}
 
 // Enums travel as camelCase strings ("session", not 0) in bodies, and bind from either form in queries.
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -188,14 +200,17 @@ if (args is ["sweep-orphan-blobs", ..])
     return;
 }
 
-// Operator entry point, like sweep-orphan-blobs: `dotnet Protostar.Registry.Api.dll reindex-search` runs one search
-// backfill pass and exits. The service runs the same pass at startup; this is for doing it on demand.
-if (args is ["reindex-search", ..])
+// Operator entry point, like sweep-orphan-blobs: `dotnet Protostar.Registry.Api.dll reparse-sessions` runs one
+// reprocessing pass (summaries and search entries) and exits. The service runs the same pass at startup and hourly;
+// this is for doing it on demand. `reindex-search` (registry#67) is the same pass under its earlier name.
+if (args is ["reparse-sessions" or "reindex-search", ..])
 {
-    await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<RegistryDbContext>().Database.MigrateAsync();
-    var result = await scope.ServiceProvider.GetRequiredService<SearchBackfill>().RunAsync(CancellationToken.None);
-    Console.WriteLine($"Indexed {result.Chunks} transcript chunks and {result.MemoryFiles} memory files; removed {result.Superseded} entries of earlier revisions.");
+    await using (var scope = app.Services.CreateAsyncScope())
+        await scope.ServiceProvider.GetRequiredService<RegistryDbContext>().Database.MigrateAsync();
+    var (transcripts, search) = await ReprocessingService.RunPassAsync(app.Services, CancellationToken.None);
+    Console.WriteLine(
+        $"Rebuilt {transcripts.Summaries} transcript summaries and indexed {transcripts.Chunks} transcript chunks ({transcripts.Failed} transcripts failed); " +
+        $"indexed {search.MemoryFiles} memory files; removed {search.Superseded} entries of earlier revisions.");
     return;
 }
 

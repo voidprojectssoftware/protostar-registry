@@ -71,6 +71,15 @@ public sealed class RegistryUser
         Assert.True(registered.IsSuccessStatusCode, $"Registering the session answered {(int)registered.StatusCode}.");
         var position = (await registered.Content.ReadFromJsonAsync<JsonObject>())!;
 
+        var appended = await AppendPromptAsync(key, prompt, position["revision"]!.GetValue<int>(), position["length"]!.GetValue<long>());
+        Assert.True(appended.IsSuccessStatusCode, $"Appending to the session answered {(int)appended.StatusCode}: {await appended.Content.ReadAsStringAsync()}");
+        return key;
+    }
+
+    /// <summary>Appends one line in which the user typed <paramref name="prompt"/> to the session <paramref name="key"/>, at the given position.</summary>
+    public async Task<HttpResponseMessage> AppendPromptAsync(string key, string prompt, int revision, long offset)
+    {
+        var machineId = await EnsureMachineAsync();
         var line = new JsonObject
         {
             ["type"] = "user",
@@ -81,10 +90,8 @@ public sealed class RegistryUser
         };
         var body = new ByteArrayContent(Encoding.UTF8.GetBytes(line.ToJsonString() + "\n"));
         body.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        var appended = await Http.PostAsync(
-            $"/v1/transcripts/{Harness}/{key}/content?revision={position["revision"]}&offset={position["length"]}&machineId={machineId}", body);
-        Assert.True(appended.IsSuccessStatusCode, $"Appending to the session answered {(int)appended.StatusCode}: {await appended.Content.ReadAsStringAsync()}");
-        return key;
+        return await Http.PostAsync(
+            $"/v1/transcripts/{Harness}/{key}/content?revision={revision}&offset={offset}&machineId={machineId}", body);
     }
 
     /// <summary>Backs up one memory file of the folder <paramref name="facts"/> describes, and returns the project it was filed under.</summary>
