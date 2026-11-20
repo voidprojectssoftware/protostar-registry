@@ -15,10 +15,20 @@ namespace Protostar.Registry.Api.Infrastructure;
 /// </remarks>
 public static class DbContextDomainEventExtensions
 {
-    public static async Task<int> SaveChangesAndDispatchAsync(
-        this DbContext db, IDomainEventDispatcher dispatcher, CancellationToken cancellationToken)
+    public static Task<int> SaveChangesAndDispatchAsync(
+        this DbContext db, IDomainEventDispatcher dispatcher, CancellationToken cancellationToken) =>
+        SaveThenDispatchAsync(db, db.SaveChangesAsync, dispatcher, cancellationToken);
+
+    /// <summary>As <see cref="SaveChangesAndDispatchAsync"/>, for a caller that handles a unique violation as a lost race (<see cref="RegistryDbContext.SaveChangesRacingAsync"/>).</summary>
+    /// <remarks>Only the save is racing: a handler that saves after it logs its own failures as usual.</remarks>
+    public static Task<int> SaveChangesRacingAndDispatchAsync(
+        this RegistryDbContext db, IDomainEventDispatcher dispatcher, CancellationToken cancellationToken) =>
+        SaveThenDispatchAsync(db, db.SaveChangesRacingAsync, dispatcher, cancellationToken);
+
+    private static async Task<int> SaveThenDispatchAsync(
+        DbContext db, Func<CancellationToken, Task<int>> save, IDomainEventDispatcher dispatcher, CancellationToken cancellationToken)
     {
-        var result = await db.SaveChangesAsync(cancellationToken);
+        var result = await save(cancellationToken);
 
         var aggregates = db.ChangeTracker.Entries<AggregateRoot>()
             .Select(entry => entry.Entity)

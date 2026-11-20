@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Protostar.Registry.Api.Common;
 
 namespace Protostar.Registry.Api.Projects;
@@ -147,6 +149,23 @@ public sealed class ProjectKey
     {
         if (string.IsNullOrEmpty(key) || key.Length > MaxLength)
             throw new ArgumentException($"A project key must be 1 to {MaxLength} characters.", nameof(key));
-        return new ProjectKey { Id = Guid.NewGuid(), ProjectId = projectId, OwnerId = ownerId, Kind = kind, Key = key, CreatedAt = now };
+        return new ProjectKey { Id = NewId(kind, key), ProjectId = projectId, OwnerId = ownerId, Kind = kind, Key = key, CreatedAt = now };
+    }
+
+    /// <summary>A new id whose sort order is fixed by <paramref name="kind"/> and <paramref name="key"/>: a hash of them, then random bytes.</summary>
+    /// <remarks>
+    /// EF inserts the rows of one table in primary key order. With wholly random ids, two requests attaching the
+    /// same keys to a new project inserted them in different orders, each held one key's unique index entry and
+    /// waited for the other's, and Postgres broke the deadlock (registry#48). With the hash first, every request
+    /// inserts the same keys in the same order, so the later one waits for the first and then loses the race
+    /// on the unique index, which <see cref="ProjectService.ResolveAsync"/> handles. The random half keeps ids
+    /// unique when a key is detached and attached again, possibly in one save.
+    /// </remarks>
+    private static Guid NewId(ProjectKeyKind kind, string key)
+    {
+        Span<byte> id = stackalloc byte[16];
+        SHA256.HashData(Encoding.UTF8.GetBytes($"{kind}:{key}")).AsSpan(0, 8).CopyTo(id);
+        RandomNumberGenerator.Fill(id[8..]);
+        return new Guid(id);
     }
 }
