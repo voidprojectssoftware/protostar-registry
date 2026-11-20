@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.0](https://github.com/voidprojectssoftware/protostar-registry/compare/v0.1.0...v0.2.0) (2026-11-20)
+
+
+### Features
+
+* **deploy:** run the registry in production from a container image ([#60](https://github.com/voidprojectssoftware/protostar-registry/issues/60)) ([#61](https://github.com/voidprojectssoftware/protostar-registry/issues/61)) ([a246831](https://github.com/voidprojectssoftware/protostar-registry/commit/a24683187fb7096fcb65cd4127af41158beadb45))
+* **memory:** back up agent memory per project, versioned by content (protostar-cli[#45](https://github.com/voidprojectssoftware/protostar-registry/issues/45)) ([#63](https://github.com/voidprojectssoftware/protostar-registry/issues/63)) ([5ce9481](https://github.com/voidprojectssoftware/protostar-registry/commit/5ce94813e311fd007d1d02b79b06efe648e0b269))
+* **memory:** download a project's memory files for pull (protostar-cli[#46](https://github.com/voidprojectssoftware/protostar-registry/issues/46)) ([#64](https://github.com/voidprojectssoftware/protostar-registry/issues/64)) ([c50567e](https://github.com/voidprojectssoftware/protostar-registry/commit/c50567ea56ed5cb2004afd5c76dbb754a086e946))
+* **memory:** keep each version's base and record deletions of pulled files (protostar-cli[#47](https://github.com/voidprojectssoftware/protostar-registry/issues/47)) ([#65](https://github.com/voidprojectssoftware/protostar-registry/issues/65)) ([17ecef7](https://github.com/voidprojectssoftware/protostar-registry/commit/17ecef7a57e0f4a77fbfc44b737bbe202349719d))
+* **memory:** read a project's memory with secrets redacted ([#13](https://github.com/voidprojectssoftware/protostar-registry/issues/13)) ([#77](https://github.com/voidprojectssoftware/protostar-registry/issues/77)) ([94f2f98](https://github.com/voidprojectssoftware/protostar-registry/commit/94f2f9865e3cf6de6929653f5b55a80693a3899d))
+* **meta:** list capabilities in /v1/meta ([#15](https://github.com/voidprojectssoftware/protostar-registry/issues/15)) ([#73](https://github.com/voidprojectssoftware/protostar-registry/issues/73)) ([19cc91c](https://github.com/voidprojectssoftware/protostar-registry/commit/19cc91c483ce30a2ecd93eae777dd734b931b5ce))
+* **search:** one owner-scoped index over sessions and memory, with secrets redacted ([#66](https://github.com/voidprojectssoftware/protostar-registry/issues/66)) ([#67](https://github.com/voidprojectssoftware/protostar-registry/issues/67)) ([739a849](https://github.com/voidprojectssoftware/protostar-registry/commit/739a849c1e7d4f68e20ede36fea91af79e650481))
+* **sessions:** list the skills a session used, with inferred versions ([#14](https://github.com/voidprojectssoftware/protostar-registry/issues/14)) ([#76](https://github.com/voidprojectssoftware/protostar-registry/issues/76)) ([cf05308](https://github.com/voidprojectssoftware/protostar-registry/commit/cf053086870677e9f3fcfe6a8614b19f32d126e3))
+* **sessions:** look up transcripts by key prefix ([#74](https://github.com/voidprojectssoftware/protostar-registry/issues/74)) ([#75](https://github.com/voidprojectssoftware/protostar-registry/issues/75)) ([7589268](https://github.com/voidprojectssoftware/protostar-registry/commit/7589268691727c247628a3cec86cdda3c8d518bb))
+* **sessions:** read a transcript with secrets redacted ([#18](https://github.com/voidprojectssoftware/protostar-registry/issues/18)) ([#72](https://github.com/voidprojectssoftware/protostar-registry/issues/72)) ([862099e](https://github.com/voidprojectssoftware/protostar-registry/commit/862099e1c579b92a7d898532b2a57f8c3519adca))
+* **sessions:** reprocess stored sessions when the parser improves ([#12](https://github.com/voidprojectssoftware/protostar-registry/issues/12)) ([#71](https://github.com/voidprojectssoftware/protostar-registry/issues/71)) ([8e1a5b7](https://github.com/voidprojectssoftware/protostar-registry/commit/8e1a5b721d0f1d6cc397cc099dbc5e929c233b1e))
+
+
+### Bug Fixes
+
+* **migrations:** no misleading Error on a first start against an empty database ([#69](https://github.com/voidprojectssoftware/protostar-registry/issues/69)) ([#70](https://github.com/voidprojectssoftware/protostar-registry/issues/70)) ([ccec97e](https://github.com/voidprojectssoftware/protostar-registry/commit/ccec97eed80f71f741fbe623e75b9432c6e9df44))
+* **search:** close the redactor's leaks and make it linear ([#78](https://github.com/voidprojectssoftware/protostar-registry/issues/78), [#79](https://github.com/voidprojectssoftware/protostar-registry/issues/79), [#80](https://github.com/voidprojectssoftware/protostar-registry/issues/80)) ([#83](https://github.com/voidprojectssoftware/protostar-registry/issues/83)) ([ebdae9d](https://github.com/voidprojectssoftware/protostar-registry/commit/ebdae9d10820281addfbfcdba201031789971ab1))
+* **sessions:** infer the version the capture hook pushed just after a skill's use ([#81](https://github.com/voidprojectssoftware/protostar-registry/issues/81)) ([#82](https://github.com/voidprojectssoftware/protostar-registry/issues/82)) ([23ec296](https://github.com/voidprojectssoftware/protostar-registry/commit/23ec296becc66e99be7bf3786180d5ddb7eb66ae))
+
 ## [0.1.0](https://github.com/voidprojectssoftware/protostar-registry/compare/v0.0.1...v0.1.0) (2026-11-20)
 
 
