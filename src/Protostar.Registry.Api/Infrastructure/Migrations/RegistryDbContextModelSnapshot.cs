@@ -262,6 +262,107 @@ namespace Protostar.Registry.Api.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("OwnerId", "ProjectId", "Path")
+                        .IsUnique();
+
+                    b.ToTable("MemoryFiles");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFileCopy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Folder")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("MachineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MemoryFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemoryFileId", "MachineId", "Folder")
+                        .IsUnique();
+
+                    b.ToTable("MemoryFileCopies");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFileVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MachineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MemoryFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MemoryFileId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("MemoryFileVersions");
+                });
+
             modelBuilder.Entity("Protostar.Registry.Api.Projects.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -715,6 +816,33 @@ namespace Protostar.Registry.Api.Migrations
                     b.Navigation("Authorization");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFile", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFileCopy", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Memory.MemoryFile", null)
+                        .WithMany("Copies")
+                        .HasForeignKey("MemoryFileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFileVersion", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Memory.MemoryFile", null)
+                        .WithMany("Versions")
+                        .HasForeignKey("MemoryFileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Protostar.Registry.Api.Projects.Project", b =>
                 {
                     b.HasOne("Protostar.Registry.Api.Identity.User", null)
@@ -844,6 +972,13 @@ namespace Protostar.Registry.Api.Migrations
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
                 {
                     b.Navigation("Tokens");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFile", b =>
+                {
+                    b.Navigation("Copies");
+
+                    b.Navigation("Versions");
                 });
 
             modelBuilder.Entity("Protostar.Registry.Api.Projects.Project", b =>

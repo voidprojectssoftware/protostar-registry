@@ -72,7 +72,7 @@ public sealed class ProjectService
 
     /// <summary>Deletes the projects among <paramref name="projectIds"/> that only ever stood for a folder (<see cref="Project.StandsOnlyForFolders"/>).</summary>
     /// <remarks>
-    /// The caller checks no transcript is filed under them. A project that has skills is kept: its skills are
+    /// The caller checks no transcript is filed under them. A project that has skills or memory is kept: they are
     /// keyed by it, and deleting it would either fail on the foreign key or orphan their history.
     /// </remarks>
     public async Task ForgetFolderProjectsAsync(Guid ownerId, IReadOnlyCollection<Guid> projectIds, CancellationToken cancellationToken)
@@ -82,6 +82,7 @@ public sealed class ProjectService
         var projects = await _db.Projects.Include(p => p.Keys)
             .Where(p => p.OwnerId == ownerId && projectIds.Contains(p.Id))
             .Where(p => !_db.Skills.Any(s => s.ProjectId == p.Id))
+            .Where(p => !_db.MemoryFiles.Any(m => m.ProjectId == p.Id))
             .ToListAsync(cancellationToken);
         _db.Projects.RemoveRange(projects.Where(p => p.StandsOnlyForFolders));
         await _db.SaveChangesAsync(cancellationToken);

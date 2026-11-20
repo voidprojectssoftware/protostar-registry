@@ -5,6 +5,7 @@ using Protostar.Registry.Api;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Memory;
 using Protostar.Registry.Api.Projects;
 using Protostar.Registry.Api.Sessions;
 using Protostar.Registry.Api.Skills;
@@ -129,6 +130,7 @@ if (!builder.Environment.IsEnvironment("Testing") &&
 // Projects: the identity sessions (and later memory and search) share across machines (ADR 0002).
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<TranscriptProjects>();
+builder.Services.AddScoped<MemoryService>();
 builder.Services.AddScoped<IFolderFilings, TranscriptFolderFilings>();
 builder.Services.AddScoped<IDomainEventHandler<ProjectRemoteAttached>, RefileShallowClones>();
 builder.Services.AddScoped<IDomainEventHandler<FolderLinkChanged>, RefileLinkedFolder>();
@@ -218,6 +220,7 @@ app.MapLoginEndpoints();
 app.MapSkillEndpoints();
 app.MapSessionEndpoints();
 app.MapProjectEndpoints();
+app.MapMemoryEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
 app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors))

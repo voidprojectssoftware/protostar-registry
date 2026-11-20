@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Protostar.Registry.Api.Identity;
+using Protostar.Registry.Api.Memory;
 using Protostar.Registry.Api.Projects;
 using Protostar.Registry.Api.Sessions;
 using Protostar.Registry.Api.Skills;
@@ -11,7 +12,8 @@ namespace Protostar.Registry.Api.Infrastructure;
 /// (<see cref="Skill"/>, <see cref="SkillVersion"/>, <see cref="SkillFile"/>) with the <see cref="SkillTombstone"/>s of
 /// removed skill names, the sessions feature
 /// (<see cref="Machine"/>, <see cref="Transcript"/>, <see cref="TranscriptChunk"/>; their bytes live in blob storage), the
-/// <see cref="Project"/> aggregate (<see cref="Project"/>, <see cref="ProjectKey"/>) plus OpenIddict's own tables
+/// <see cref="Project"/> aggregate (<see cref="Project"/>, <see cref="ProjectKey"/>), the <see cref="MemoryFile"/> aggregate
+/// (<see cref="MemoryFile"/>, <see cref="MemoryFileVersion"/>, <see cref="MemoryFileCopy"/>) plus OpenIddict's own tables
 /// (applications, authorizations, scopes, tokens), added to the model by the <c>UseOpenIddict()</c> call
 /// configured on the context options. As the infrastructure boundary it applies each feature's
 /// <see cref="IEntityTypeConfiguration{TEntity}"/>. Domain events are dispatched by
@@ -39,6 +41,12 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
     public DbSet<Project> Projects => Set<Project>();
 
     public DbSet<ProjectKey> ProjectKeys => Set<ProjectKey>();
+
+    public DbSet<MemoryFile> MemoryFiles => Set<MemoryFile>();
+
+    public DbSet<MemoryFileVersion> MemoryFileVersions => Set<MemoryFileVersion>();
+
+    public DbSet<MemoryFileCopy> MemoryFileCopies => Set<MemoryFileCopy>();
 
     /// <summary>Whether the save in progress came from <see cref="SaveChangesRacingAsync"/>.</summary>
     internal bool SavingRacingInsert { get; private set; }
