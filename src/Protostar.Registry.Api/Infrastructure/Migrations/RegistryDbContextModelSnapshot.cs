@@ -632,6 +632,12 @@ namespace Protostar.Registry.Api.Migrations
                             b1.Property<int>("ParserVersion")
                                 .HasColumnType("integer");
 
+                            b1.Property<string>("Skills")
+                                .IsRequired()
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("jsonb")
+                                .HasDefaultValueSql("'[]'::jsonb");
+
                             b1.Property<DateTimeOffset?>("StartedAt")
                                 .HasColumnType("timestamp with time zone");
 
