@@ -19,8 +19,9 @@ public static class LoginPageEndpoints
         var login = app.MapGroup("/login").WithTags(ApiTags.SignIn);
 
         login.MapGet("", (
-            [Description("Where to continue after sign-in. Must be a path on this registry; anything else falls back to `/`.")] string? returnUrl) =>
-            Results.Content(RenderLoginPage(LocalReturnUrl(returnUrl)), "text/html; charset=utf-8"))
+            [Description("Where to continue after sign-in. Must be a path on this registry; anything else falls back to `/`.")] string? returnUrl,
+            AuthProviders providers) =>
+            Results.Content(RenderLoginPage(providers, LocalReturnUrl(returnUrl)), "text/html; charset=utf-8"))
             .WithName("ShowSignInChooser")
             .WithSummary("Show the sign-in chooser")
             .WithDescription("An HTML page with one button per identity provider. The authorize endpoint sends a browser " +
@@ -30,10 +31,11 @@ public static class LoginPageEndpoints
 
         login.MapGet("/challenge", (
             [Description("The provider's hint (for example `github`) or scheme name.")] string provider,
-            [Description("Where to continue after sign-in. Must be a path on this registry; anything else falls back to `/`.")] string? returnUrl) =>
+            [Description("Where to continue after sign-in. Must be a path on this registry; anything else falls back to `/`.")] string? returnUrl,
+            AuthProviders providers) =>
         {
-            var target = AuthProviders.ByHint(provider)
-                ?? AuthProviders.All.FirstOrDefault(p =>
+            var target = providers.ByHint(provider)
+                ?? providers.All.FirstOrDefault(p =>
                     string.Equals(p.Scheme, provider, StringComparison.OrdinalIgnoreCase));
 
             if (target is null)
@@ -63,12 +65,12 @@ public static class LoginPageEndpoints
             ? returnUrl
             : "/";
 
-    private static string RenderLoginPage(string returnUrl)
+    private static string RenderLoginPage(AuthProviders providers, string returnUrl)
     {
         var encodedReturn = UrlEncoder.Default.Encode(returnUrl);
 
         var buttons = new StringBuilder();
-        foreach (var provider in AuthProviders.All)
+        foreach (var provider in providers.All)
         {
             var href = $"/login/challenge?provider={UrlEncoder.Default.Encode(provider.Hint)}&returnUrl={encodedReturn}";
             buttons.Append(

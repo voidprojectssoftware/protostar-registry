@@ -6,29 +6,34 @@ namespace Protostar.Registry.Api.Identity;
 /// <param name="Hint">Short token a client passes (e.g. <c>identity_provider=github</c>) to skip the chooser.</param>
 public sealed record AuthProvider(string Scheme, string DisplayName, string Hint);
 
-/// <summary>
-/// The identity providers wired into the registry. To add one, register its authentication handler
-/// in Program.cs and add an entry here; the sign-in page and the provider-hint shortcut pick it up
-/// automatically.
-/// </summary>
-public static class AuthProviders
+/// <summary>The identity providers this host offers, registered once in DI.</summary>
+/// <remarks>
+/// To add a provider, register its authentication handler in <see cref="SignInRegistration"/> and add an
+/// entry here; the sign-in page and the provider-hint shortcut pick it up automatically. The list depends on
+/// the host environment only, and <see cref="SignInRegistration"/> registers the Development sign-in scheme
+/// from <see cref="OffersDevelopmentSignIn"/>, so the page and the schemes cannot disagree.
+/// </remarks>
+public sealed class AuthProviders
 {
     private static readonly AuthProvider GitHub = new(AuthEndpoints.GitHubScheme, "GitHub", "github");
 
     private static readonly AuthProvider DevelopmentLocal =
         new(DevelopmentSignInHandler.SchemeName, "Local dev user (Development only)", "dev");
 
-    /// <summary>The providers offered on the sign-in page, in display order.</summary>
-    public static IReadOnlyList<AuthProvider> All { get; private set; } = [GitHub];
+    private AuthProviders(IReadOnlyList<AuthProvider> all) => All = all;
 
-    /// <summary>
-    /// Adds the <see cref="DevelopmentSignInHandler"/> provider (hint <c>dev</c>). Call once at startup,
-    /// and only in the Development environment, after registering its authentication scheme.
-    /// </summary>
-    public static void EnableDevelopmentSignIn() => All = [GitHub, DevelopmentLocal];
+    /// <summary>The providers for <paramref name="environment"/>: GitHub everywhere, plus the dev sign-in in Development only.</summary>
+    public static AuthProviders For(IHostEnvironment environment) =>
+        new(environment.IsDevelopment() ? [GitHub, DevelopmentLocal] : [GitHub]);
+
+    /// <summary>The providers offered on the sign-in page, in display order.</summary>
+    public IReadOnlyList<AuthProvider> All { get; }
+
+    /// <summary>Whether the <see cref="DevelopmentSignInHandler"/> provider (hint <c>dev</c>) is offered.</summary>
+    public bool OffersDevelopmentSignIn => All.Contains(DevelopmentLocal);
 
     /// <summary>Resolves a provider by its <see cref="AuthProvider.Hint"/> (case-insensitive).</summary>
-    public static AuthProvider? ByHint(string? hint) =>
+    public AuthProvider? ByHint(string? hint) =>
         string.IsNullOrWhiteSpace(hint)
             ? null
             : All.FirstOrDefault(p => string.Equals(p.Hint, hint, StringComparison.OrdinalIgnoreCase));

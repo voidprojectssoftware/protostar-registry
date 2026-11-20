@@ -1,9 +1,9 @@
 name: edge
 
-# Rolling prerelease channel. On every code change to main, build the tip of main and push it as the
-# single moving `:edge` image tag to GHCR. The version comes for free from MinVer (e.g.
-# 0.1.0-alpha.0.N) and is stamped into the app; the image tag itself stays `edge`. Stable releases
-# are handled separately by release-please.
+# Rolling prerelease channel. On every code change to main, build the image from the Dockerfile and push it
+# to GHCR as the moving `:edge` tag and an immutable `:sha-<short>` tag. The version stamped into the app
+# comes from MinVer (e.g. 0.1.0-alpha.0.N), computed here because the Docker build context has no git
+# history. Stable releases are handled by release-please.yml.
 on:
   push:
     branches: [main]
@@ -11,6 +11,8 @@ on:
       - 'src/**'
       - '**/*.csproj'
       - 'Directory.Build.props'
+      - 'Dockerfile'
+      - '.dockerignore'
       - '.github/workflows/edge.yml'
 
 permissions:
@@ -21,6 +23,9 @@ permissions:
 concurrency:
   group: edge-image
   cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/voidprojectssoftware/protostar-registry
 
 jobs:
   publish-edge-image:
@@ -34,13 +39,25 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Compute version
+        id: version
+        run: |
+          dotnet restore src/Protostar.Registry.Api/Protostar.Registry.Api.csproj
+          echo "version=$(dotnet msbuild src/Protostar.Registry.Api/Protostar.Registry.Api.csproj -t:MinVer -getProperty:MinVerVersion)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Publish edge container image
+      - name: Build and push edge image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHORT_SHA: ${{ steps.version.outputs.short_sha }}
         run: |
-          dotnet publish src/Protostar.Registry.Api/Protostar.Registry.Api.csproj \
-            -c Release --os linux --arch x64 -t:PublishContainer \
-            -p:ContainerRegistry=ghcr.io \
-            -p:ContainerRepository="${{ github.repository_owner }}/protostar-registry" \
-            -p:ContainerImageTags=edge
+          docker build \
+            --build-arg VERSION="$VERSION" \
+            --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.opencontainers.image.version="$VERSION" \
+            -t "$IMAGE:edge" -t "$IMAGE:sha-$SHORT_SHA" .
+          docker push --all-tags "$IMAGE"

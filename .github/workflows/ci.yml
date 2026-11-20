@@ -28,3 +28,8 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build
+
+      # The image the edge and release workflows push, built (not pushed) so a broken Dockerfile fails here
+      # rather than after merge.
+      - name: Build container image
+        run: docker build -t protostar-registry:ci .

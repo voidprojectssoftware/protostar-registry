@@ -84,9 +84,9 @@ understands — and gets a clear "please update" message the moment it doesn't.
 The registry ships as a **container image** to GHCR, not a binary:
 
 - **stable** — Conventional Commits drive a release-please Release PR; merging it
-  tags `vX.Y.Z` and the workflow builds and pushes `:X.Y.Z` and `:latest`.
-- **edge** — every change to `main` rebuilds and pushes a rolling `:edge` image,
-  versioned by MinVer (`0.X.Y-alpha.0.N`). The `edge` tag does not start with `v`,
+  tags `vX.Y.Z` and the workflow builds the `Dockerfile` and pushes `:vX.Y.Z` and `:latest`.
+- **edge**: every change to `main` rebuilds and pushes a rolling `:edge` image (and an
+  immutable `:sha-<short>`), versioned by MinVer (`0.X.Y-alpha.0.N`). The `edge` tag does not start with `v`,
   so MinVer ignores it and the channels never collide.
 
 This mirrors the [CLI's release model](/cli/develop/releasing) — same automation,

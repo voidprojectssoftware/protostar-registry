@@ -70,7 +70,7 @@ dashboard you will see two resources, `postgres` and `api`. The API:
 
 - is pinned to **`https://localhost:7443`** (a stable, non-proxied port — this is what `--registry`
   and the GitHub callback point at);
-- applies EF Core migrations and seeds the `protostar-cli` OAuth client automatically in Development;
+- applies EF Core migrations and seeds the `protostar-cli` OAuth client automatically on startup;
 - exposes named links in the dashboard: **API reference (Scalar)** at `/scalar/v1`, **OpenAPI
   document** at `/openapi/v1.json`, **Service metadata** at `/v1/meta`, **OpenID configuration**, and
   **Health checks**.
@@ -151,10 +151,9 @@ live in the CLI repo's Reqnroll suite.
 ## Database and migrations
 
 The schema is EF Core (`RegistryDbContext`) plus OpenIddict's tables. Migrations apply automatically
-on startup **in Development only**. In production they are **not** auto-applied — they are run as an
-explicit deploy step (typically `dotnet ef database update`, or a generated migration bundle, run by
-your deploy pipeline before the new image serves traffic). Keeping production manual avoids a racing
-container applying a migration mid-rollout.
+on startup, in every environment (production included since #60), before the API serves requests. EF Core
+locks the migrations history table while it migrates, so two instances starting together cannot both apply
+one. See [Running the registry in production](./deploy/production.md#migrations).
 
 Migration commands use the EF Core CLI tool. Install it once if you do not have it:
 
@@ -173,8 +172,10 @@ tooling can build the model without a running database.
 
 ## Releasing
 
-The registry ships as a container image to GHCR, not a binary. release-please drives stable
-`:X.Y.Z` + `:latest` images; the edge workflow pushes a rolling `:edge` on every push to `main`. See
+The registry ships as a container image to GHCR, not a binary, built from the root `Dockerfile`.
+release-please drives stable `:vX.Y.Z` + `:latest` images; the edge workflow pushes a rolling `:edge` and an
+immutable `:sha-<short>` on every code change to `main`. To run the image, see
+[Running the registry in production](./deploy/production.md). See
 [How the registry works → Releasing](./concepts.md#releasing) for the version/release model.
 
 ## Troubleshooting
