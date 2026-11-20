@@ -25,6 +25,8 @@ namespace Protostar.Registry.Api.Skills;
 /// accepted as before, for clients from before the rule. Two pushes racing from the same base both pass the
 /// aggregate's check, and the unique (skill, version) index saves only one: the other is reported as stale, or
 /// as unchanged when it carried the same content as the winner.
+/// A push of a name the registry has a tombstone for (<see cref="SkillTombstone"/>), from a copy based on the removed
+/// skill's versions, is refused (<see cref="SkillPushError.Removed"/>) instead of bringing the skill back.
 /// </remarks>
 public sealed class SkillPushService
 {
@@ -103,7 +105,16 @@ public sealed class SkillPushService
 
         var now = DateTimeOffset.UtcNow;
         var isNewSkill = skill is null;
-        skill ??= Skill.Create(creatorId, name, now, projectId);
+        SkillTombstone? tombstone = null;
+        if (isNewSkill)
+        {
+            tombstone = await _db.SkillTombstones.AsNoTracking()
+                .FirstOrDefaultAsync(t => t.CreatorId == creatorId && t.ProjectId == projectId && t.Name == name, cancellationToken);
+            if (tombstone?.Refuses(baseVersion) == true)
+                return SkillPushResult.Removed(tombstone, baseVersion!.Value, resolution);
+        }
+
+        skill ??= Skill.Create(creatorId, name, now, projectId, tombstone);
 
         SkillVersionPushOutcome outcome;
         try
@@ -128,7 +139,7 @@ public sealed class SkillPushService
 
         try
         {
-            await PersistAsync(skill, outcome.Version, isNewSkill, cancellationToken);
+            await PersistAsync(skill, outcome.Version, isNewSkill, tombstone, cancellationToken);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
@@ -173,10 +184,12 @@ public sealed class SkillPushService
     /// new version is added through <see cref="DbContext.Add(object)"/> (which also marks its files) because
     /// EF would otherwise read its domain-assigned key as an existing row and emit an UPDATE that stores
     /// nothing. An existing skill has no cycle, so its new version inserts and the pointer updates in a
-    /// single save.
+    /// single save. A new skill that takes a removed skill's name drops that name's tombstone in the same transaction;
+    /// the delete is a plain statement, so a racing push that dropped it first deletes nothing here and the unique
+    /// skill index decides which push wins.
     /// </remarks>
     private async Task PersistAsync(
-        Skill skill, SkillVersion newVersion, bool isNewSkill, CancellationToken cancellationToken)
+        Skill skill, SkillVersion newVersion, bool isNewSkill, SkillTombstone? replaced, CancellationToken cancellationToken)
     {
         if (!isNewSkill)
         {
@@ -191,6 +204,9 @@ public sealed class SkillPushService
         await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+            if (replaced is not null)
+                await _db.SkillTombstones.Where(t => t.Id == replaced.Id).ExecuteDeleteAsync(cancellationToken);
 
             _db.Skills.Add(skill);
             var pointer = _db.Entry(skill).Property(s => s.CurrentVersionId);

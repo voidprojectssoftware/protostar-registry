@@ -9,6 +9,12 @@ namespace Protostar.Registry.Api.Skills;
 /// A skill is addressed like the reads address it: the caller's skill of that exact name in that project, where no
 /// project means the global skill. Another user's skill is never found, so it answers as missing rather than
 /// forbidden; <see cref="Skill.Rename"/> and <see cref="Skill.EnsureCanDelete"/> still check the creator rule.
+/// <para>
+/// Both leave a <see cref="SkillTombstone"/> for the name that went away, so another machine's copy of it is not pushed
+/// back (registry#58). The tombstones keep two rules: one exists only while its name has no live skill, so a rename
+/// into a tombstoned name drops it; and a rename tombstone names the skill's current name, so a later rename moves
+/// it along and a delete turns it into a delete.
+/// </para>
 /// </remarks>
 public sealed class SkillChangeService
 {
@@ -46,6 +52,12 @@ public sealed class SkillChangeService
             return SkillChangeResult.Fail(SkillChangeError.NameTaken, ex.Message);
         }
 
+        var tombstones = await TombstonesAsync(creatorId, projectId, cancellationToken);
+        _db.SkillTombstones.RemoveRange(tombstones.Where(t => t.Name == newName));
+        foreach (var renamedHere in tombstones.Where(t => t.RenamedTo == name && t.Name != newName))
+            renamedHere.FollowRename(newName);
+        _db.SkillTombstones.Add(SkillTombstone.Renamed(skill, name, await LastVersionAsync(skill, cancellationToken), DateTimeOffset.UtcNow));
+
         try
         {
             await _db.SaveChangesRacingAsync(cancellationToken);
@@ -72,13 +84,34 @@ public sealed class SkillChangeService
             return SkillChangeResult.Fail(SkillChangeError.NotFound, Missing(projectId, name));
 
         skill.EnsureCanDelete(creatorId);
+        foreach (var renamedHere in (await TombstonesAsync(creatorId, projectId, cancellationToken)).Where(t => t.RenamedTo == name))
+            renamedHere.TargetDeleted();
+        _db.SkillTombstones.Add(SkillTombstone.Deleted(skill, await LastVersionAsync(skill, cancellationToken), DateTimeOffset.UtcNow));
         _db.Skills.Remove(skill);
-        await _db.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await _db.SaveChangesRacingAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex is DbUpdateConcurrencyException || ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // Another delete of the same skill removed it (or saved its tombstone) first; the skill is gone either way.
+            return SkillChangeResult.Fail(SkillChangeError.NotFound, Missing(projectId, name));
+        }
+
         return SkillChangeResult.Ok(name);
     }
 
     private Task<Skill?> FindAsync(Guid creatorId, Guid? projectId, string name, CancellationToken cancellationToken) =>
         _db.Skills.FirstOrDefaultAsync(s => s.CreatorId == creatorId && s.ProjectId == projectId && s.Name == name, cancellationToken);
+
+    // Read rather than loaded with the skill: a tracked version would make EF order the skill's delete around the
+    // skill's pointer to it. A skill always has a version once pushed; 0 is a skill row whose first push never saved.
+    private async Task<int> LastVersionAsync(Skill skill, CancellationToken cancellationToken) =>
+        await _db.SkillVersions.Where(v => v.SkillId == skill.Id).MaxAsync(v => (int?)v.VersionNumber, cancellationToken) ?? 0;
+
+    private Task<List<SkillTombstone>> TombstonesAsync(Guid creatorId, Guid? projectId, CancellationToken cancellationToken) =>
+        _db.SkillTombstones.Where(t => t.CreatorId == creatorId && t.ProjectId == projectId).ToListAsync(cancellationToken);
 
     private static string Missing(Guid? projectId, string name) =>
         projectId is { } p ? $"You have no skill '{name}' in project {p}." : $"You have no global skill '{name}'.";

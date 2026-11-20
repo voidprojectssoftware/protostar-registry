@@ -51,6 +51,22 @@ public sealed class SkillQueryService
             .ToList();
     }
 
+    /// <summary>The names <paramref name="creatorId"/> deleted or renamed away that <paramref name="filter"/> selects, ordered by name.</summary>
+    /// <remarks>Listed with the skills so a client can tell a copy of a removed skill from a skill the registry never had, at no extra request.</remarks>
+    public async Task<IReadOnlyList<SkillRemoval>> ListRemovedAsync(Guid creatorId, SkillListFilter filter, CancellationToken cancellationToken)
+    {
+        var query = _db.SkillTombstones.AsNoTracking().Where(t => t.CreatorId == creatorId);
+        query = filter switch
+        {
+            { ProjectId: { } projectId } => query.Where(t => t.ProjectId == projectId),
+            { IncludeProjects: true } => query,
+            _ => query.Where(t => t.ProjectId == null),
+        };
+
+        var rows = await query.Select(t => new SkillRemoval(t.Name, t.ProjectId, t.LastVersion, t.RenamedTo, t.RemovedAt)).ToListAsync(cancellationToken);
+        return rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     /// <summary>
     /// One version of the skill named <paramref name="name"/> with every file's bytes, or <c>null</c> when
     /// the caller has no such skill or the skill has no such version.
@@ -110,6 +126,14 @@ public sealed record SkillListFilter(bool IncludeProjects = false, Guid? Project
 public sealed record SkillSummary(
     string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes,
     Guid? ProjectId = null, string? ProjectName = null);
+
+/// <summary>A skill name the creator deleted or renamed away (a <see cref="SkillTombstone"/>).</summary>
+/// <param name="Name">The removed name.</param>
+/// <param name="ProjectId">Its project; <c>null</c> for a global skill.</param>
+/// <param name="LastVersion">The skill's last version under this name.</param>
+/// <param name="RenamedTo">The skill's name now, when it was renamed; <c>null</c> when it was deleted.</param>
+/// <param name="RemovedAt">When the name was removed.</param>
+public sealed record SkillRemoval(string Name, Guid? ProjectId, int LastVersion, string? RenamedTo, DateTimeOffset RemovedAt);
 
 /// <summary>One version of a skill with every file's bytes.</summary>
 /// <param name="Name">The skill's name, exactly as stored.</param>
