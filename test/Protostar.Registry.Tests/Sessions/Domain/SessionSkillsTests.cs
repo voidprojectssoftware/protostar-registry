@@ -39,6 +39,52 @@ public sealed class SessionSkillsTests
     }
 
     [Fact]
+    public void A_skill_edited_then_used_is_the_version_the_capture_hook_pushed_just_after_the_use()
+    {
+        // The hook runs on PostToolUse, so the edited content is pushed seconds after the Skill tool_use line.
+        var use = Monday.AddHours(3);
+        var deploy = SkillWithVersionsAt("deploy", null, Monday, use.AddSeconds(2));
+
+        Assert.Equal(2, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+    }
+
+    [Fact]
+    public void A_skill_first_used_then_pushed_by_the_capture_hook_is_version_1()
+    {
+        var use = Monday.AddHours(3);
+        var deploy = SkillWithVersionsAt("deploy", null, use.AddSeconds(2));
+
+        Assert.Equal(1, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+    }
+
+    [Fact]
+    public void A_version_pushed_at_the_end_of_the_grace_counts()
+    {
+        var use = Monday.AddHours(3);
+        var deploy = SkillWithVersionsAt("deploy", null, Monday, use + SessionSkills.PushGrace);
+
+        Assert.Equal(2, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+    }
+
+    [Fact]
+    public void A_later_edit_pushed_after_the_grace_keeps_the_version_in_force_at_the_use()
+    {
+        var use = Monday.AddHours(3);
+        var deploy = SkillWithVersionsAt("deploy", null, Monday, use + SessionSkills.PushGrace + TimeSpan.FromSeconds(1));
+
+        Assert.Equal(1, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+    }
+
+    [Fact]
+    public void A_skill_first_pushed_after_the_grace_matches_with_no_version()
+    {
+        var use = Monday.AddHours(3);
+        var deploy = SkillWithVersionsAt("deploy", null, use + SessionSkills.PushGrace + TimeSpan.FromSeconds(1));
+
+        Assert.Null(MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+    }
+
+    [Fact]
     public void A_skill_first_pushed_after_the_session_matches_with_no_version()
     {
         var deploy = SkillWithVersionsAt("deploy", null, Monday.AddDays(1));
