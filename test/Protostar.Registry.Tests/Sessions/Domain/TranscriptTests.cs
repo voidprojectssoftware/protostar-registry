@@ -1,4 +1,5 @@
 using System.Text;
+using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Sessions;
 using Xunit;
 
@@ -261,6 +262,22 @@ public sealed class ClaudeCodeTranscriptParserTests
         Assert.True(prompt.Length <= 200);
         Assert.DoesNotContain('\n', prompt);
         Assert.EndsWith("...", prompt);
+    }
+
+    [Fact]
+    public void Timestamps_with_a_non_UTC_offset_keep_their_instant()
+    {
+        // Claude Code writes Z, but another harness or a format change may not (#56).
+        var facts = Parse(
+            """{"type":"user","timestamp":"2026-11-09T16:49:28.840-06:00","message":{"role":"user","content":"Spec out the CRM"}}""",
+            """{"type":"assistant","timestamp":"2026-11-09T16:49:32.356-06:00","message":{"role":"assistant","content":[{"type":"text","text":"Sure"}]}}""");
+
+        Assert.Equal(DateTimeOffset.Parse("2026-11-09T22:49:28.840Z"), facts.FirstTimestamp);
+        Assert.Equal(DateTimeOffset.Parse("2026-11-09T22:49:32.356Z"), facts.LastTimestamp);
+
+        // The parser keeps the offset it read; the persistence convention stores it as UTC.
+        var stored = (DateTimeOffset)new UtcDateTimeOffsetConverter().ConvertToProvider(facts.FirstTimestamp!.Value)!;
+        Assert.Equal(TimeSpan.Zero, stored.Offset);
     }
 
     [Fact]
