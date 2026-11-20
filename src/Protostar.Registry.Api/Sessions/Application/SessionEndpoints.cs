@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using OpenIddict.Abstractions;
 using Protostar.Registry.Api.Infrastructure;
+using Protostar.Registry.Api.Search;
 using Protostar.Registry.Api.Skills;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -340,8 +341,8 @@ public sealed record TranscriptPositionProblem(string Title, int Status, int Rev
 /// <param name="Key">Its key within the harness.</param>
 /// <param name="Kind">Session or subagent.</param>
 /// <param name="ParentKey">For a subagent, the session it ran in.</param>
-/// <param name="Title">The harness's title for the session, or the first prompt when it has none.</param>
-/// <param name="FirstPrompt">The first thing the user asked, shortened.</param>
+/// <param name="Title">The harness's title for the session, or the first prompt when it has none; known secrets redacted.</param>
+/// <param name="FirstPrompt">The first thing the user asked, shortened; known secrets redacted.</param>
 /// <param name="ProjectId">The project the session belongs to, the same on every machine; <c>null</c> until its working directory is known.</param>
 /// <param name="Project">The project's display name: its normalised remote, or a folder name.</param>
 /// <param name="ProjectSubpath">The working directory's path within its repo, when it is a subfolder.</param>
@@ -370,7 +371,7 @@ public sealed record TranscriptResponse(
         var t = view.Transcript;
         var s = t.Summary;
         return new TranscriptResponse(
-            t.Harness.Value, t.Key.Value, t.Kind, t.ParentKey?.Value, s.Title ?? s.FirstPrompt, s.FirstPrompt, t.ProjectId,
+            t.Harness.Value, t.Key.Value, t.Kind, t.ParentKey?.Value, SecretRedactor.RedactOrNull(s.Title ?? s.FirstPrompt), SecretRedactor.RedactOrNull(s.FirstPrompt), t.ProjectId,
             view.ProjectName, t.ProjectSubpath, s.WorkingDirectory, s.GitBranch, s.HarnessVersion, t.MachineId, view.Machine?.Name, t.SourcePath, s.StartedAt, s.LastActivityAt,
             s.UserMessages, s.AssistantMessages, s.Lines, t.Length, t.Revision, view.SubagentCount);
     }

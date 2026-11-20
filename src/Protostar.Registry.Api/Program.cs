@@ -7,6 +7,7 @@ using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Memory;
 using Protostar.Registry.Api.Projects;
+using Protostar.Registry.Api.Search;
 using Protostar.Registry.Api.Sessions;
 using Protostar.Registry.Api.Skills;
 using Scalar.AspNetCore;
@@ -135,6 +136,17 @@ builder.Services.AddScoped<IFolderFilings, TranscriptFolderFilings>();
 builder.Services.AddScoped<IDomainEventHandler<ProjectRemoteAttached>, RefileShallowClones>();
 builder.Services.AddScoped<IDomainEventHandler<FolderLinkChanged>, RefileLinkedFolder>();
 
+// Search: an owner-scoped Postgres full-text index over redacted session and memory text, kept current by
+// domain event handlers as content arrives, and filled in for older content by a background backfill (not in the
+// database-free test host).
+builder.Services.AddScoped<SearchService>();
+builder.Services.AddScoped<SearchIndexer>();
+builder.Services.AddScoped<SearchBackfill>();
+builder.Services.AddScoped<IDomainEventHandler<TranscriptChunkAppended>, IndexAppendedChunk>();
+builder.Services.AddScoped<IDomainEventHandler<MemoryFileChanged>, IndexChangedMemoryFile>();
+if (!builder.Environment.IsEnvironment("Testing"))
+    builder.Services.AddHostedService<SearchBackfillService>();
+
 // Enums travel as camelCase strings ("session", not 0) in bodies, and bind from either form in queries.
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase)));
@@ -172,6 +184,17 @@ if (args is ["sweep-orphan-blobs", ..])
     await using var scope = app.Services.CreateAsyncScope();
     var result = await scope.ServiceProvider.GetRequiredService<OrphanChunkBlobSweep>().RunAsync(CancellationToken.None);
     Console.WriteLine($"Listed {result.Listed} chunk blobs, deleted {result.Deleted} orphans.");
+    return;
+}
+
+// Operator entry point, like sweep-orphan-blobs: `dotnet Protostar.Registry.Api.dll reindex-search` runs one search
+// backfill pass and exits. The service runs the same pass at startup; this is for doing it on demand.
+if (args is ["reindex-search", ..])
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<RegistryDbContext>().Database.MigrateAsync();
+    var result = await scope.ServiceProvider.GetRequiredService<SearchBackfill>().RunAsync(CancellationToken.None);
+    Console.WriteLine($"Indexed {result.Chunks} transcript chunks and {result.MemoryFiles} memory files; removed {result.Superseded} entries of earlier revisions.");
     return;
 }
 
@@ -221,6 +244,7 @@ app.MapSkillEndpoints();
 app.MapSessionEndpoints();
 app.MapProjectEndpoints();
 app.MapMemoryEndpoints();
+app.MapSearchEndpoints();
 
 // API-contract version surface. The CLI checks `apiMajors` on connect to decide compatibility.
 app.MapGet("/v1/meta", () => new ApiMeta("protostar-registry", ApiInfo.Version, ApiInfo.ApiMajors))

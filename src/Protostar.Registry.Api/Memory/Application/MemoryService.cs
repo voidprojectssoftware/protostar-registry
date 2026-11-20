@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Projects;
 using Protostar.Registry.Api.Skills;
@@ -32,11 +33,13 @@ public sealed class MemoryService
 {
     private readonly RegistryDbContext _db;
     private readonly ProjectService _projects;
+    private readonly IDomainEventDispatcher _events;
 
-    public MemoryService(RegistryDbContext db, ProjectService projects)
+    public MemoryService(RegistryDbContext db, ProjectService projects, IDomainEventDispatcher events)
     {
         _db = db;
         _projects = projects;
+        _events = events;
     }
 
     /// <summary>Records the changed and deleted memory files of one project folder on one machine.</summary>
@@ -86,9 +89,9 @@ public sealed class MemoryService
             try
             {
                 if (attempt < 3)
-                    await _db.SaveChangesRacingAsync(cancellationToken);
+                    await _db.SaveChangesRacingAndDispatchAsync(_events, cancellationToken);
                 else
-                    await _db.SaveChangesAsync(cancellationToken);
+                    await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
                 return MemoryResult<MemoryPushResult>.Ok(new MemoryPushResult(project.ProjectId, project.Name, identity.Folder, outcomes));
             }
             catch (DbUpdateException ex) when (attempt < 3 && ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })

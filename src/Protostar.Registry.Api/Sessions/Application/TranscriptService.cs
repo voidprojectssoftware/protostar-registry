@@ -187,7 +187,7 @@ public sealed class TranscriptService
 
         try
         {
-            await _db.SaveChangesRacingAsync(cancellationToken);
+            await _db.SaveChangesRacingAndDispatchAsync(_events, cancellationToken);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException || ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
