@@ -77,7 +77,7 @@ public sealed class MemoryService
         // Resolve first: resolution saves any new project and may reset the change tracker on a race.
         var identity = ProjectIdentity.From(request.MachineId, request.Project);
         var project = await _projects.ResolveAsync(ownerId, identity, cancellationToken);
-        var sent = files.Zip(paths).Select(p => (Path: p.Second, Content: p.First.Content!)).ToList();
+        var sent = files.Zip(paths).Select(p => (Path: p.Second, Content: p.First.Content!, p.First.BaseVersion)).ToList();
         var gone = paths.Skip(files.Count).ToList();
 
         for (var attempt = 1; ; attempt++)
@@ -101,7 +101,7 @@ public sealed class MemoryService
 
     private async Task<List<MemoryFileOutcome>> ApplyAsync(
         Guid ownerId, Guid projectId, Guid machineId, string folder,
-        IReadOnlyList<(RelativePath Path, byte[] Content)> sent, IReadOnlyList<RelativePath> gone, CancellationToken cancellationToken)
+        IReadOnlyList<(RelativePath Path, byte[] Content, int? BaseVersion)> sent, IReadOnlyList<RelativePath> gone, CancellationToken cancellationToken)
     {
         var wanted = sent.Select(s => s.Path).Concat(gone).ToList();
         var existing = await _db.MemoryFiles
@@ -112,11 +112,11 @@ public sealed class MemoryService
 
         var now = DateTimeOffset.UtcNow;
         var outcomes = new List<MemoryFileOutcome>(wanted.Count);
-        foreach (var (path, content) in sent)
+        foreach (var (path, content, baseVersion) in sent)
         {
             if (!existing.TryGetValue(path.Value, out var file))
                 file = _db.MemoryFiles.Add(MemoryFile.Create(ownerId, projectId, path, now)).Entity;
-            var recorded = file.Record(machineId, folder, content, now);
+            var recorded = file.Record(machineId, folder, content, now, baseVersion);
             outcomes.Add(new MemoryFileOutcome(path.Value, recorded.Change, recorded.Version));
         }
 
@@ -249,7 +249,17 @@ public sealed class MemoryService
         if (version is not null && !versions.ContainsKey((chosen[0].File.Id, version.Value)))
             return MemoryResult<MemoryProjectContent>.UnknownFile($"{wanted!.Value} has no version {version}.");
 
-        var machineIds = files.SelectMany(f => f.Copies).Where(c => c.DeletedAt is not null).Select(c => c.MachineId).Distinct().ToList();
+        // Every version's base, numbers only, so a client can tell which versions build on the one it has.
+        var fileIds = files.Select(f => f.Id).ToList();
+        var history = (await _db.MemoryFileVersions.AsNoTracking()
+                .Where(v => fileIds.Contains(v.MemoryFileId))
+                .Select(v => new { v.MemoryFileId, v.Number, v.BaseNumber })
+                .ToListAsync(cancellationToken))
+            .ToLookup(v => v.MemoryFileId, v => new MemoryVersionBase(v.Number, v.BaseNumber));
+
+        var machineIds = files.SelectMany(f => f.Copies).Where(c => c.DeletedAt is not null).Select(c => c.MachineId)
+            .Concat(versions.Values.Select(v => v.MachineId))
+            .Distinct().ToList();
         var machineNames = await _db.Machines.AsNoTracking()
             .Where(m => m.OwnerId == ownerId && machineIds.Contains(m.Id))
             .ToDictionaryAsync(m => m.Id, m => m.Name, cancellationToken);
@@ -263,6 +273,8 @@ public sealed class MemoryService
                     var v = versions[(c.File.Id, c.Number)];
                     return new MemoryFileContent(
                         c.File.Path.Value, v.Number, v.Sha256.Value, v.Size, v.Content, v.Number == c.Current.Version, c.Current.DeletedEverywhere,
+                        v.MachineId, machineNames.GetValueOrDefault(v.MachineId),
+                        [.. history[c.File.Id].OrderBy(h => h.Version)],
                         c.File.Copies.Where(k => k.DeletedAt is not null)
                             .OrderBy(k => k.MachineId).ThenBy(k => k.Folder, StringComparer.Ordinal)
                             .Select(k => new MemoryCopyView(k.MachineId, machineNames.GetValueOrDefault(k.MachineId), k.Folder, k.VersionNumber, k.DeletedAt, k.UpdatedAt))
@@ -282,7 +294,8 @@ public sealed record MemoryPushRequest(Guid MachineId, ProjectFacts? Project, IR
 /// <summary>One file of a memory push.</summary>
 /// <param name="Path">Its path within the memory folder, with <c>/</c> separators.</param>
 /// <param name="Content">Its bytes (base64 in JSON).</param>
-public sealed record MemoryFileUpload(string? Path, byte[]? Content);
+/// <param name="BaseVersion">The version this machine last synced for the file, which it edited; absent for a file new on this machine.</param>
+public sealed record MemoryFileUpload(string? Path, byte[]? Content, int? BaseVersion = null);
 
 /// <summary>What a push did: the project and folder the memory was filed under, and each file's outcome.</summary>
 public sealed record MemoryPushResult(Guid ProjectId, string ProjectName, string Folder, IReadOnlyList<MemoryFileOutcome> Files);
@@ -290,7 +303,7 @@ public sealed record MemoryPushResult(Guid ProjectId, string ProjectName, string
 /// <summary>What happened to one file of a push.</summary>
 /// <param name="Path">The file's path.</param>
 /// <param name="Change">What changed.</param>
-/// <param name="Version">The version this machine's copy now points at; <c>null</c> for a deletion of a file it never backed up.</param>
+/// <param name="Version">The version this machine's copy now points at; <c>null</c> for a deletion of a path the registry has no file for.</param>
 public sealed record MemoryFileOutcome(string Path, MemoryFileChange Change, int? Version);
 
 /// <summary>A project that has memory.</summary>
@@ -330,9 +343,23 @@ public sealed record MemoryProjectContent(Guid ProjectId, string ProjectName, IR
 /// <param name="Content">Its bytes (base64 in JSON).</param>
 /// <param name="Current">Whether this is the file's current version (<see cref="MemoryFile.Current"/>).</param>
 /// <param name="DeletedEverywhere">Whether every machine's copy has deleted the file.</param>
+/// <param name="MachineId">The machine that first sent this content, as <see cref="MemoryFileVersion.MachineId"/>.</param>
+/// <param name="MachineName">That machine's name, or <c>null</c> once it is no longer registered.</param>
+/// <param name="History">Every version of the file with the version it was edited from, oldest first.</param>
 /// <param name="DeletedOn">The copies that deleted it; the others still hold it.</param>
+/// <remarks>
+/// <paramref name="MachineId"/> and <paramref name="MachineName"/> let a pulling machine say where a version it cannot
+/// take came from ("changed here and on vm-laptop") and name the copy it keeps beside its own; <paramref name="History"/>
+/// lets it tell a version that builds on its own from a parallel edit (protostar-cli#47).
+/// </remarks>
 public sealed record MemoryFileContent(
-    string Path, int Version, string Sha256, long Size, byte[] Content, bool Current, bool DeletedEverywhere, IReadOnlyList<MemoryCopyView> DeletedOn);
+    string Path, int Version, string Sha256, long Size, byte[] Content, bool Current, bool DeletedEverywhere,
+    Guid MachineId, string? MachineName, IReadOnlyList<MemoryVersionBase> History, IReadOnlyList<MemoryCopyView> DeletedOn);
+
+/// <summary>One version of a memory file and the version it was edited from.</summary>
+/// <param name="Version">Its number.</param>
+/// <param name="Base">The version its sender had last synced (<see cref="MemoryFileVersion.BaseNumber"/>); <c>null</c> when unknown or none.</param>
+public sealed record MemoryVersionBase(int Version, int? Base);
 
 /// <summary>Why a memory request was refused.</summary>
 public enum MemoryFailure
