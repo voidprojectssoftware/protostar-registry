@@ -183,4 +183,51 @@ public sealed class MemoryFileTests
 
         Assert.Equal(Text("a"), file.Versions.Single().Content);
     }
+
+    [Fact]
+    public void The_current_version_is_what_the_most_recently_changed_copy_holds()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.Record(Desktop, Repo, Text("b"), Now.AddMinutes(1));
+
+        Assert.Equal(new MemoryFileCurrent(2, false), file.Current());
+    }
+
+    [Fact]
+    public void A_copy_reverted_to_older_content_makes_that_older_version_current()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.Record(Laptop, Repo, Text("b"), Now.AddMinutes(1));
+
+        file.Record(Laptop, Repo, Text("a"), Now.AddMinutes(2));
+
+        Assert.Equal(new MemoryFileCurrent(1, false), file.Current());
+    }
+
+    [Fact]
+    public void A_deletion_on_one_machine_leaves_the_copy_still_present_elsewhere_current()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.Record(Desktop, Repo, Text("b"), Now.AddMinutes(1));
+
+        file.MarkDeleted(Desktop, Repo, Now.AddMinutes(2));
+
+        Assert.Equal(new MemoryFileCurrent(1, false), file.Current());
+    }
+
+    [Fact]
+    public void A_file_deleted_on_every_copy_is_current_at_what_the_last_copy_held_and_marked_deleted_everywhere()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.Record(Desktop, Repo, Text("b"), Now.AddMinutes(1));
+        file.MarkDeleted(Laptop, Repo, Now.AddMinutes(2));
+
+        file.MarkDeleted(Desktop, Repo, Now.AddMinutes(3));
+
+        Assert.Equal(new MemoryFileCurrent(2, true), file.Current());
+    }
 }

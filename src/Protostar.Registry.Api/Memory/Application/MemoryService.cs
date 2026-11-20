@@ -204,6 +204,72 @@ public sealed class MemoryService
                     f.UpdatedAt))
                 .ToList());
     }
+    /// <summary>The content of one of the owner's projects' memory files: each file's current version, or one given version of one file.</summary>
+    /// <remarks>
+    /// <c>path</c> limits the answer to one file, and <c>version</c> (which needs <c>path</c>) asks for that version
+    /// instead of the current one. The current version is <see cref="MemoryFile.Current"/>. Copies are loaded to choose it, and then only the
+    /// chosen versions' content, so a file with a long history costs one version's bytes.
+    /// </remarks>
+    public async Task<MemoryResult<MemoryProjectContent>> GetContentAsync(Guid ownerId, Guid projectId, string? path, int? version, CancellationToken cancellationToken)
+    {
+        RelativePath? wanted = null;
+        if (path is not null)
+        {
+            if (path.Length > MemoryLimits.MaxPathLength || !RelativePath.TryCreate(path, out var valid))
+                return MemoryResult<MemoryProjectContent>.Invalid($"'{path}' is not a valid relative path of at most {MemoryLimits.MaxPathLength} characters.");
+            wanted = valid;
+        }
+        else if (version is not null)
+        {
+            return MemoryResult<MemoryProjectContent>.Invalid("A version needs the path of the file it is a version of.");
+        }
+
+        var name = await _db.Projects.AsNoTracking()
+            .Where(p => p.OwnerId == ownerId && p.Id == projectId)
+            .Select(p => p.Name)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (name is null)
+            return MemoryResult<MemoryProjectContent>.UnknownProject($"No project {projectId}.");
+
+        var query = _db.MemoryFiles.AsNoTracking().Include(f => f.Copies).Where(f => f.OwnerId == ownerId && f.ProjectId == projectId);
+        if (wanted is not null)
+            query = query.Where(f => f.Path == wanted);
+        var files = await query.ToListAsync(cancellationToken);
+        if (wanted is not null && files.Count == 0)
+            return MemoryResult<MemoryProjectContent>.UnknownFile($"Project {projectId} has no memory file {wanted.Value}.");
+
+        var chosen = files.Select(f => (File: f, Current: f.Current())).Select(c => (c.File, c.Current, Number: version ?? c.Current.Version)).ToList();
+        var ids = chosen.Select(c => c.File.Id).ToList();
+        var numbers = chosen.Select(c => c.Number).Distinct().ToList();
+        // Can fetch a few versions too many (another file's number); the exact pairs are matched below.
+        var versions = (await _db.MemoryFileVersions.AsNoTracking()
+                .Where(v => ids.Contains(v.MemoryFileId) && numbers.Contains(v.Number))
+                .ToListAsync(cancellationToken))
+            .ToDictionary(v => (v.MemoryFileId, v.Number));
+        if (version is not null && !versions.ContainsKey((chosen[0].File.Id, version.Value)))
+            return MemoryResult<MemoryProjectContent>.UnknownFile($"{wanted!.Value} has no version {version}.");
+
+        var machineIds = files.SelectMany(f => f.Copies).Where(c => c.DeletedAt is not null).Select(c => c.MachineId).Distinct().ToList();
+        var machineNames = await _db.Machines.AsNoTracking()
+            .Where(m => m.OwnerId == ownerId && machineIds.Contains(m.Id))
+            .ToDictionaryAsync(m => m.Id, m => m.Name, cancellationToken);
+
+        return MemoryResult<MemoryProjectContent>.Ok(new MemoryProjectContent(
+            projectId,
+            name,
+            chosen.OrderBy(c => c.File.Path.Value, StringComparer.Ordinal)
+                .Select(c =>
+                {
+                    var v = versions[(c.File.Id, c.Number)];
+                    return new MemoryFileContent(
+                        c.File.Path.Value, v.Number, v.Sha256.Value, v.Size, v.Content, v.Number == c.Current.Version, c.Current.DeletedEverywhere,
+                        c.File.Copies.Where(k => k.DeletedAt is not null)
+                            .OrderBy(k => k.MachineId).ThenBy(k => k.Folder, StringComparer.Ordinal)
+                            .Select(k => new MemoryCopyView(k.MachineId, machineNames.GetValueOrDefault(k.MachineId), k.Folder, k.VersionNumber, k.DeletedAt, k.UpdatedAt))
+                            .ToList());
+                })
+                .ToList()));
+    }
 }
 
 /// <summary>A memory push: the changed and deleted files of one project folder on one machine.</summary>
@@ -253,6 +319,21 @@ public sealed record MemoryVersionView(int Version, string Sha256, long Size, Gu
 /// <param name="UpdatedAt">When this copy last changed.</param>
 public sealed record MemoryCopyView(Guid MachineId, string? MachineName, string Folder, int Version, DateTimeOffset? DeletedAt, DateTimeOffset UpdatedAt);
 
+/// <summary>The content of a project's memory files.</summary>
+public sealed record MemoryProjectContent(Guid ProjectId, string ProjectName, IReadOnlyList<MemoryFileContent> Files);
+
+/// <summary>One version of one memory file, with its bytes.</summary>
+/// <param name="Path">The file's path.</param>
+/// <param name="Version">The version's number.</param>
+/// <param name="Sha256">Uppercase hex SHA-256 of <paramref name="Content"/>.</param>
+/// <param name="Size">Its size in bytes.</param>
+/// <param name="Content">Its bytes (base64 in JSON).</param>
+/// <param name="Current">Whether this is the file's current version (<see cref="MemoryFile.Current"/>).</param>
+/// <param name="DeletedEverywhere">Whether every machine's copy has deleted the file.</param>
+/// <param name="DeletedOn">The copies that deleted it; the others still hold it.</param>
+public sealed record MemoryFileContent(
+    string Path, int Version, string Sha256, long Size, byte[] Content, bool Current, bool DeletedEverywhere, IReadOnlyList<MemoryCopyView> DeletedOn);
+
 /// <summary>Why a memory request was refused.</summary>
 public enum MemoryFailure
 {
@@ -260,6 +341,8 @@ public enum MemoryFailure
     Invalid,
     TooLarge,
     UnknownMachine,
+    UnknownProject,
+    UnknownFile,
 }
 
 /// <summary>A value, or why a memory request was refused.</summary>
@@ -272,4 +355,8 @@ public sealed record MemoryResult<T>(T? Value, MemoryFailure Failure, string? Me
     public static MemoryResult<T> TooLarge(string message) => new(default, MemoryFailure.TooLarge, message);
 
     public static MemoryResult<T> UnknownMachine(string message) => new(default, MemoryFailure.UnknownMachine, message);
+
+    public static MemoryResult<T> UnknownProject(string message) => new(default, MemoryFailure.UnknownProject, message);
+
+    public static MemoryResult<T> UnknownFile(string message) => new(default, MemoryFailure.UnknownFile, message);
 }

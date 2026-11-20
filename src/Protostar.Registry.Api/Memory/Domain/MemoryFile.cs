@@ -111,6 +111,29 @@ public sealed class MemoryFile : AggregateRoot
         return new MemoryFileRecorded(MemoryFileChange.MarkedDeleted, copy.VersionNumber);
     }
 
+    /// <summary>The version a checkout that does not have the file yet should take, and whether every copy has deleted it.</summary>
+    /// <remarks>
+    /// <para>
+    /// The current version is the one the most recently changed present copy holds, not the highest number: a machine
+    /// that reverted a note to earlier content points its copy at the earlier version, and that is what it holds now.
+    /// </para>
+    /// <para>
+    /// A copy deleted on one machine says nothing about the others, so deleted copies count only when no copy is
+    /// present; then the current version is what the most recently changed copy last held, and
+    /// <see cref="MemoryFileCurrent.DeletedEverywhere"/> is set.
+    /// </para>
+    /// </remarks>
+    public MemoryFileCurrent Current()
+    {
+        var present = _copies.Where(c => c.DeletedAt is null).MaxBy(c => c.UpdatedAt);
+        if (present is not null)
+            return new MemoryFileCurrent(present.VersionNumber, false);
+
+        // Every file has a copy: Record adds one with the first version, and nothing removes copies.
+        var last = _copies.MaxBy(c => c.UpdatedAt)!;
+        return new MemoryFileCurrent(last.VersionNumber, true);
+    }
+
     private MemoryFileCopy? CopyOn(Guid machineId, string folder) =>
         _copies.FirstOrDefault(c => c.MachineId == machineId && c.Folder == folder);
 }
@@ -235,6 +258,11 @@ public enum MemoryFileChange
     /// <summary>A deletion for a file the sending checkout never backed up; nothing to mark.</summary>
     Unknown,
 }
+
+/// <summary>The outcome of <see cref="MemoryFile.Current"/>.</summary>
+/// <param name="Version">The version a checkout without the file should take.</param>
+/// <param name="DeletedEverywhere">Whether every copy has deleted the file.</param>
+public sealed record MemoryFileCurrent(int Version, bool DeletedEverywhere);
 
 /// <summary>The outcome of <see cref="MemoryFile.Record"/> or <see cref="MemoryFile.MarkDeleted"/>.</summary>
 /// <param name="Change">What changed.</param>
