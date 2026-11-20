@@ -39,13 +39,14 @@ public sealed class SkillQueryService
                 s.CurrentVersion.VersionNumber,
                 s.CurrentVersion.ContentHash,
                 s.CurrentVersion.CreatedAt,
+                FirstVersion = _db.SkillVersions.Where(v => v.SkillId == s.Id).Min(v => v.VersionNumber),
                 FileCount = s.CurrentVersion.Files.Count,
                 TotalBytes = s.CurrentVersion.Files.Sum(f => f.Size),
             })
             .ToListAsync(cancellationToken);
 
         return rows
-            .Select(r => new SkillSummary(r.Name, r.Description, r.VersionNumber, r.ContentHash.Value, r.CreatedAt, r.FileCount, r.TotalBytes, r.ProjectId, r.ProjectName))
+            .Select(r => new SkillSummary(r.Name, r.Description, r.VersionNumber, r.ContentHash.Value, r.CreatedAt, r.FileCount, r.TotalBytes, r.ProjectId, r.ProjectName, r.FirstVersion))
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(s => s.ProjectName, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -123,9 +124,13 @@ public sealed record SkillListFilter(bool IncludeProjects = false, Guid? Project
 /// <param name="TotalBytes">The current version's total size in bytes.</param>
 /// <param name="ProjectId">The skill's project; <c>null</c> for a global skill.</param>
 /// <param name="ProjectName">That project's display name; <c>null</c> for a global skill.</param>
+/// <param name="FirstVersion">
+/// The skill's first version number: 1, or above it for a skill that reused a removed skill's name, whose versions are
+/// numbered after the removed skill's (<see cref="SkillTombstone"/>).
+/// </param>
 public sealed record SkillSummary(
     string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes,
-    Guid? ProjectId = null, string? ProjectName = null);
+    Guid? ProjectId = null, string? ProjectName = null, int FirstVersion = 1);
 
 /// <summary>A skill name the creator deleted or renamed away (a <see cref="SkillTombstone"/>).</summary>
 /// <param name="Name">The removed name.</param>

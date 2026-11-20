@@ -100,7 +100,8 @@ public static class SkillEndpoints
                 "by name. `includeProjects=true` adds every project's skills; `projectId` lists only that " +
                 "project's. A global skill has no `projectId`. `removed` lists, under the same filter, the names deleted or renamed " +
                 "away that no skill has taken since: each with its project, `lastVersion`, `renamedTo` (the skill's name now; null " +
-                "for a delete) and `removedAt`. The content hash is SHA-256 over each file's `<path>\\n<UPPERCASE hex sha256>\\n`, " +
+                "for a delete) and `removedAt`. Each skill's `firstVersion` is 1, or above it for a skill that reused a removed " +
+                "skill's name: a copy synced at a lower version is a copy of the removed skill. The content hash is SHA-256 over each file's `<path>\\n<UPPERCASE hex sha256>\\n`, " +
                 "files ordered by path (ordinal), as uppercase hex, so a client can tell whether its local " +
                 "copy matches without downloading it.")
             .Produces<SkillListResponse>(StatusCodes.Status200OK)
@@ -200,7 +201,7 @@ public static class SkillEndpoints
         var removed = await queries.ListRemovedAsync(creatorId, filter, cancellationToken);
         return Results.Ok(new SkillListResponse(
             skills.Select(s => new SkillListItem(
-                s.Name, s.Description, s.Version, s.ContentHash, s.UpdatedAt, s.FileCount, s.TotalBytes, s.ProjectId, s.ProjectName)).ToArray(),
+                s.Name, s.Description, s.Version, s.ContentHash, s.UpdatedAt, s.FileCount, s.TotalBytes, s.ProjectId, s.ProjectName, s.FirstVersion)).ToArray(),
             removed.Select(r => new SkillRemovedItem(r.Name, r.ProjectId, r.LastVersion, r.RenamedTo, r.RemovedAt)).ToArray()));
     }
 
@@ -463,10 +464,13 @@ public sealed record SkillListResponse(IReadOnlyList<SkillListItem> Skills, IRea
 public sealed record SkillRemovedItem(string Name, Guid? ProjectId, int LastVersion, string? RenamedTo, DateTimeOffset RemovedAt);
 
 /// <summary>One skill in <see cref="SkillListResponse"/>, described by its current version.</summary>
-/// <remarks><c>ProjectId</c> and <c>ProjectName</c> are null for a global skill.</remarks>
+/// <remarks>
+/// <c>ProjectId</c> and <c>ProjectName</c> are null for a global skill. <c>FirstVersion</c> is above 1 for a skill that
+/// reused a removed skill's name: a copy synced at a version below it is a copy of that removed skill, not of this one.
+/// </remarks>
 public sealed record SkillListItem(
     string Name, string? Description, int Version, string ContentHash, DateTimeOffset UpdatedAt, int FileCount, long TotalBytes,
-    Guid? ProjectId, string? ProjectName);
+    Guid? ProjectId, string? ProjectName, int FirstVersion);
 
 /// <summary>The JSON body of a rename.</summary>
 public sealed record SkillRenameRequest(string? NewName);
