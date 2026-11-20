@@ -123,7 +123,9 @@ public static class SessionEndpoints
             .WithName("ListTranscripts")
             .WithSummary("List my transcripts")
             .WithDescription("Lists sessions (or subagents) from every machine, most recently active first. Page with `before`, passing the last item's `lastActivityAt`.")
-            .Produces<TranscriptResponse[]>();
+            .Produces<TranscriptResponse[]>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .WithDateTimeQueryParameters("since", "before");
     }
 
     private static async Task<IResult> RegisterMachineAsync(
@@ -232,14 +234,18 @@ public static class SessionEndpoints
         [Description("Only this harness, for example `claude-code`.")] string? harness = null,
         [Description("Only transcripts from this machine.")] Guid? machine = null,
         [Description("Only sessions in this project: its id, or text its name contains, for example `protostar`.")] string? project = null,
-        [Description("Only transcripts active at or after this time.")] DateTimeOffset? since = null,
-        [Description("Only transcripts last active before this time; pass the previous page's last `lastActivityAt`.")] DateTimeOffset? before = null,
+        [Description("Only transcripts active at or after this time, with any offset; one without an offset is UTC.")] string? since = null,
+        [Description("Only transcripts last active before this time; pass the previous page's last `lastActivityAt`.")] string? before = null,
         [Description("Page size, 1 to 200.")] int limit = 50)
     {
         if (!TryGetOwner(user, out var ownerId))
             return Results.Unauthorized();
+        if (!QueryTimestamp.TryParseUtc(since, out var sinceUtc))
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: QueryTimestamp.InvalidTitle(nameof(since)));
+        if (!QueryTimestamp.TryParseUtc(before, out var beforeUtc))
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: QueryTimestamp.InvalidTitle(nameof(before)));
 
-        var views = await service.ListAsync(ownerId, new TranscriptQuery(kind, harness, machine, project, since, before, limit), cancellationToken);
+        var views = await service.ListAsync(ownerId, new TranscriptQuery(kind, harness, machine, project, sinceUtc, beforeUtc, limit), cancellationToken);
         return Results.Ok(views.Select(TranscriptResponse.From).ToArray());
     }
 

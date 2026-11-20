@@ -68,6 +68,23 @@ public static class OpenApiExtensions
             return Task.CompletedTask;
         });
 
+    /// <summary>Documents the query parameters <paramref name="names"/> as <c>date-time</c> strings.</summary>
+    /// <remarks>
+    /// For a parameter bound as text and read with <see cref="QueryTimestamp"/>, so the document still says what
+    /// the value is, as it did when ASP.NET Core bound it as a <see cref="DateTimeOffset"/>.
+    /// </remarks>
+    public static RouteHandlerBuilder WithDateTimeQueryParameters(this RouteHandlerBuilder builder, params string[] names) =>
+        builder.AddOpenApiOperationTransformer((operation, _, _) =>
+        {
+            foreach (var parameter in operation.Parameters ?? [])
+            {
+                if (parameter.In == ParameterLocation.Query && names.Contains(parameter.Name) && parameter.Schema is OpenApiSchema schema)
+                    schema.Format = "date-time";
+            }
+
+            return Task.CompletedTask;
+        });
+
     /// <summary>Documents a <c>302 Found</c> response whose <c>Location</c> header is described by <paramref name="description"/>.</summary>
     public static RouteHandlerBuilder ProducesRedirect(this RouteHandlerBuilder builder, string description) =>
         builder.AddOpenApiOperationTransformer((operation, _, _) =>
