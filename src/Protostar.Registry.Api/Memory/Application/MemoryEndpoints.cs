@@ -28,6 +28,20 @@ public static class MemoryEndpoints
         register it with `PUT /v1/machines/{machineId}` and retry.
         """;
 
+    private static readonly string ContentDescription =
+        $$"""
+        Every memory file of the project with the bytes of its current version (base64 in JSON), in one response. With
+        `path`, only that file; with `path` and `version`, that version of it.
+
+        The current version is the one the most recently changed copy that still has the file holds, so a note one
+        machine reverted is served as reverted. `deletedOn` lists the copies that deleted the file; `deletedEverywhere`
+        is set when no copy still has it, and then the content is what the last copy held. A client bringing memory to
+        a new machine decides what a deletion means for it; the registry never drops the file.
+
+        A `404` with problem `type` `{{MemoryProblemTypes.UnknownProject}}` means the project is not yours or does not
+        exist; `{{MemoryProblemTypes.UnknownFile}}` means it has no such file or version.
+        """;
+
     public static void MapMemoryEndpoints(this WebApplication app)
     {
         var memory = app.MapGroup("/v1/memory").RequireAuthorization(SkillEndpoints.Policy).DisableAntiforgery().WithTags(ApiTags.Memory);
@@ -50,6 +64,13 @@ public static class MemoryEndpoints
             .WithSummary("List a project's memory files")
             .WithDescription($"Every memory file of the project, with its versions and each machine's copy (the version it last sent, and when it was deleted there). No content. A `404` with problem `type` `{MemoryProblemTypes.UnknownProject}` means the project is not yours or does not exist.")
             .Produces<MemoryProjectFilesResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+        memory.MapGet("/{projectId:guid}/content", GetContentAsync)
+            .WithName("GetProjectMemoryContent")
+            .WithSummary("Download a project's memory files")
+            .WithDescription(ContentDescription)
+            .Produces<MemoryProjectContentResponse>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
@@ -90,6 +111,25 @@ public static class MemoryEndpoints
             : Results.Ok(MemoryProjectFilesResponse.From(files));
     }
 
+    private static async Task<IResult> GetContentAsync(
+        [Description("The project, as `GET /v1/memory` shows it.")] Guid projectId,
+        [Description("Only this file, by its path in the memory folder.")] string? path,
+        [Description("This version of `path` instead of its current one.")] int? version,
+        ClaimsPrincipal user, MemoryService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var result = await service.GetContentAsync(ownerId, projectId, path, version, cancellationToken);
+        return result.Failure switch
+        {
+            MemoryFailure.None => Results.Ok(MemoryProjectContentResponse.From(result.Value!)),
+            MemoryFailure.UnknownProject => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Message, type: MemoryProblemTypes.UnknownProject),
+            MemoryFailure.UnknownFile => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Message, type: MemoryProblemTypes.UnknownFile),
+            _ => Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: result.Message),
+        };
+    }
+
     private static bool TryGetOwner(ClaimsPrincipal user, out Guid ownerId) =>
         Guid.TryParse(user.GetClaim(Claims.Subject), out ownerId);
 }
@@ -102,6 +142,9 @@ public static class MemoryProblemTypes
 
     /// <summary>No project with that id among the caller's (status <c>404</c>).</summary>
     public const string UnknownProject = "https://protostar.dev/problems/unknown-project";
+
+    /// <summary>The project has no memory file at that path, or the file has no such version (status <c>404</c>).</summary>
+    public const string UnknownFile = "https://protostar.dev/problems/unknown-memory-file";
 }
 
 /// <summary>What a memory push did.</summary>
@@ -137,4 +180,10 @@ public sealed record MemoryProjectResponse(Guid ProjectId, string ProjectName, i
 public sealed record MemoryProjectFilesResponse(Guid ProjectId, string ProjectName, IReadOnlyList<MemoryFileView> Files)
 {
     internal static MemoryProjectFilesResponse From(MemoryProjectFiles f) => new(f.ProjectId, f.ProjectName, f.Files);
+}
+
+/// <summary>A project's memory files with their content.</summary>
+public sealed record MemoryProjectContentResponse(Guid ProjectId, string ProjectName, IReadOnlyList<MemoryFileContent> Files)
+{
+    internal static MemoryProjectContentResponse From(MemoryProjectContent c) => new(c.ProjectId, c.ProjectName, c.Files);
 }
