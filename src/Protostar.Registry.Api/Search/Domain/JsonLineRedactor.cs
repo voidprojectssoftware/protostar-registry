@@ -44,14 +44,6 @@ public static class JsonLineRedactor
         }
     }
 
-    /// <summary>Returns one JSONL line with secrets redacted; see the class remarks.</summary>
-    public static byte[] RedactLine(ReadOnlySpan<byte> line)
-    {
-        var output = new ArrayBufferWriter<byte>(line.Length);
-        RedactLine(line, output);
-        return output.WrittenSpan.ToArray();
-    }
-
     private static void RedactLine(ReadOnlySpan<byte> line, IBufferWriter<byte> destination)
     {
         if (!TryRedactJson(line, destination))

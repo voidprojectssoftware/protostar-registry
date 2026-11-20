@@ -41,7 +41,7 @@ public static partial class SecretRedactor
 
         foreach (var pattern in All)
         {
-            if (pattern.Needs is { } needs && text.AsSpan().IndexOfAny(needs) < 0)
+            if (!_prefiltersOff && pattern.Prefilter.Skips(text))
                 continue;
 
             text = pattern.Group is null
@@ -66,41 +66,90 @@ public static partial class SecretRedactor
     public static string Marker(string type) => $"[redacted:{type}]";
 
     // A pattern, and the marker that replaces what it matches. With a group, only that group is replaced and the rest
-    // of the match (a name, an equals sign, a URL's user) stays readable. Needs, when set, holds literals of which the
-    // pattern's every match contains at least one: text holding none of them is skipped without running the regex.
-    // It is set only on the patterns that have no literal prefix of their own and so cost far more per byte (about
-    // 50 to 100 MB/s, against several GB/s for the rest), and must list every literal its pattern can require.
-    private sealed record Pattern(string Type, Regex Regex, string? Group = null, SearchValues<string>? Needs = null)
+    // of the match (a name, an equals sign, a URL's user) stays readable.
+    private sealed record Pattern(string Type, Regex Regex, Prefilter Prefilter, string? Group = null)
     {
         public string Marker { get; } = SecretRedactor.Marker(Type);
 
         public MatchEvaluator Evaluator { get; } = m => KeepAround(m, m.Groups[Group!], SecretRedactor.Marker(Type));
     }
 
-    private static SearchValues<string> Literals(StringComparison comparison, params string[] values) => SearchValues.Create(values, comparison);
+    /// <summary>Whether a pattern may be skipped for text that holds none of a set of literals.</summary>
+    /// <remarks>
+    /// Every pattern declares one. <see cref="None"/> is for patterns with a literal prefix of their own, which the
+    /// regex engine already searches for at several GB/s. The rest (about 50 to 110 MB/s, because nothing fixed starts
+    /// a match) list literals of which every match holds at least one. A list that misses one would skip a secret, so
+    /// the unit tests run every sample with and without prefilters and require the same output.
+    /// </remarks>
+    internal sealed class Prefilter
+    {
+        private readonly SearchValues<string>? _values;
+
+        private Prefilter(bool applies, StringComparison comparison, string[] literals)
+        {
+            Applies = applies;
+            Comparison = comparison;
+            Literals = literals;
+            // An empty list would skip every text; leave it inert here, and let the declaration test name it.
+            _values = applies && literals.Length > 0 ? SearchValues.Create(literals, comparison) : null;
+        }
+
+        /// <summary>The pattern always runs.</summary>
+        public static Prefilter None { get; } = new(false, StringComparison.Ordinal, []);
+
+        /// <summary>The pattern runs only on text holding at least one of <paramref name="literals"/>.</summary>
+        public static Prefilter AnyOf(StringComparison comparison, params string[] literals) => new(true, comparison, literals);
+
+        public bool Applies { get; }
+        public StringComparison Comparison { get; }
+        public IReadOnlyList<string> Literals { get; }
+
+        /// <summary>True when the pattern cannot match <paramref name="text"/> and need not run.</summary>
+        public bool Skips(string text) => _values is not null && text.AsSpan().IndexOfAny(_values) < 0;
+    }
+
+    /// <summary>Each pattern's type and the prefilter it declares, in the order the patterns run; for tests.</summary>
+    internal static IReadOnlyList<(string Type, Prefilter? Prefilter)> Prefilters { get; } = All.Select(p => (p.Type, (Prefilter?)p.Prefilter)).ToList();
+
+    [ThreadStatic]
+    private static bool _prefiltersOff;
+
+    /// <summary>Runs every pattern on every text, on this thread, until the result is disposed; for tests.</summary>
+    /// <remarks>Lets a test compare the prefiltered output with the full one. Synchronous callers only: the switch is per thread.</remarks>
+    internal static IDisposable WithoutPrefilters()
+    {
+        _prefiltersOff = true;
+        return new PrefiltersBack();
+    }
+
+    private sealed class PrefiltersBack : IDisposable
+    {
+        public void Dispose() => _prefiltersOff = false;
+    }
 
     // Order matters; see the class remarks.
     private static IEnumerable<Pattern> Patterns()
     {
-        yield return new("private-key", PrivateKey());
-        yield return new("jwt", Jwt());
-        yield return new("url-password", UrlPassword(), "secret", Literals(StringComparison.Ordinal, "://"));
-        yield return new("connection-string-password", ConnectionStringPassword(), "secret", Literals(StringComparison.OrdinalIgnoreCase, "password", "pwd"));
-        yield return new("azure-storage-key", AzureStorageKey(), "secret");
-        yield return new("azure-sas-signature", AzureSasSignature(), "secret");
-        yield return new("azure-client-secret", AzureClientSecret(), Needs: Literals(StringComparison.Ordinal, "Q~"));
-        yield return new("aws-access-key", AwsAccessKey());
-        yield return new("aws-secret-key", AwsSecretKey(), "secret");
-        yield return new("github-token", GitHubToken());
-        yield return new("anthropic-key", AnthropicKey());
-        yield return new("openai-key", OpenAiKey());
-        yield return new("google-api-key", GoogleApiKey());
-        yield return new("slack-token", SlackToken());
-        yield return new("stripe-key", StripeKey());
+        var none = Prefilter.None;
+        yield return new("private-key", PrivateKey(), none);
+        yield return new("jwt", Jwt(), none);
+        yield return new("url-password", UrlPassword(), Prefilter.AnyOf(StringComparison.Ordinal, "://"), "secret");
+        yield return new("connection-string-password", ConnectionStringPassword(), Prefilter.AnyOf(StringComparison.OrdinalIgnoreCase, "password", "pwd"), "secret");
+        yield return new("azure-storage-key", AzureStorageKey(), none, "secret");
+        yield return new("azure-sas-signature", AzureSasSignature(), none, "secret");
+        yield return new("azure-client-secret", AzureClientSecret(), Prefilter.AnyOf(StringComparison.Ordinal, "Q~"));
+        yield return new("aws-access-key", AwsAccessKey(), none);
+        yield return new("aws-secret-key", AwsSecretKey(), none, "secret");
+        yield return new("github-token", GitHubToken(), none);
+        yield return new("anthropic-key", AnthropicKey(), none);
+        yield return new("openai-key", OpenAiKey(), none);
+        yield return new("google-api-key", GoogleApiKey(), none);
+        yield return new("slack-token", SlackToken(), none);
+        yield return new("stripe-key", StripeKey(), none);
         // The stems stop before "key": under (?i) the pattern's k also matches the Kelvin sign (U+212A), which
         // OrdinalIgnoreCase does not equate with k.
-        yield return new("secret", SecretAssignment(), "secret", Literals(StringComparison.OrdinalIgnoreCase,
-            "password", "passwd", "secret", "token", "api", "access", "private"));
+        yield return new("secret", SecretAssignment(), Prefilter.AnyOf(StringComparison.OrdinalIgnoreCase,
+            "password", "passwd", "secret", "token", "api", "access", "private"), "secret");
     }
 
     private const RegexOptions Options = RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture;

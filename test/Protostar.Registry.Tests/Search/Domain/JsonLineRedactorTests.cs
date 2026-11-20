@@ -17,14 +17,9 @@ public sealed class JsonLineRedactorTests
     // Escapes quotes as \" the way harnesses written in JavaScript do; the default writes \u0022.
     private static readonly JsonSerializerOptions Relaxed = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    private static string Redact(string content)
-    {
-        var output = new ArrayBufferWriter<byte>();
-        JsonLineRedactor.Redact(Encoding.UTF8.GetBytes(content), output);
-        return Encoding.UTF8.GetString(output.WrittenSpan);
-    }
+    private static string Redact(string content) => Encoding.UTF8.GetString(PrefilterCheck.RedactJsonLines(Encoding.UTF8.GetBytes(content)));
 
-    private static string RedactLine(string line) => Encoding.UTF8.GetString(JsonLineRedactor.RedactLine(Encoding.UTF8.GetBytes(line)));
+    private static string RedactLine(string line) => Redact(line);
 
     private static void AssertNoSecrets(string text)
     {

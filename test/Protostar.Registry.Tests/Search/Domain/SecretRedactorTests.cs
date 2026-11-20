@@ -37,7 +37,7 @@ public sealed class SecretRedactorTests
     {
         var text = string.Format(around, secret);
 
-        var redacted = SecretRedactor.Redact(text);
+        var redacted = PrefilterCheck.Redact(text);
 
         Assert.DoesNotContain(secret, redacted);
         Assert.Equal(string.Format(around, SecretRedactor.Marker(type)), redacted);
@@ -48,7 +48,7 @@ public sealed class SecretRedactorTests
     {
         var block = "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA" + Repeat("q8Zx", 64) + "\n-----END RSA PRIVATE KEY-----";
 
-        var redacted = SecretRedactor.Redact($"here it is:\n{block}\nthanks");
+        var redacted = PrefilterCheck.Redact($"here it is:\n{block}\nthanks");
 
         Assert.Equal("here it is:\n[redacted:private-key]\nthanks", redacted);
     }
@@ -58,7 +58,7 @@ public sealed class SecretRedactorTests
     {
         var block = "-----BEGIN " + "PRIVATE KEY-----\\nMIIEvQIBADANBg" + Repeat("q8Zx", 64) + "\\n-----END PRIVATE KEY-----\\n";
 
-        var redacted = SecretRedactor.Redact($"{{\"private_key\": \"{block}\"}}");
+        var redacted = PrefilterCheck.Redact($"{{\"private_key\": \"{block}\"}}");
 
         Assert.DoesNotContain("MIIEvQIBADANBg", redacted);
         Assert.Contains("[redacted:private-key]", redacted);
@@ -67,7 +67,7 @@ public sealed class SecretRedactorTests
     [Fact]
     public void A_truncated_private_key_block_is_replaced_to_the_end_of_its_body()
     {
-        var redacted = SecretRedactor.Redact("-----BEGIN " + "OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA" + Repeat("q8Zx", 40));
+        var redacted = PrefilterCheck.Redact("-----BEGIN " + "OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA" + Repeat("q8Zx", 40));
 
         Assert.Equal("[redacted:private-key]", redacted);
     }
@@ -79,28 +79,32 @@ public sealed class SecretRedactorTests
     [InlineData("export API_KEY=abcdef123456", "export API_KEY=[redacted:secret]")]
     [InlineData("secret = 'tops3cret'", "secret = '[redacted:secret]'")]
     [InlineData("Api_Key=abcdef123456", "Api_Key=[redacted:secret]")]
+    [InlineData("auth_token=abcd1234efgh", "auth_token=[redacted:secret]")]
+    [InlineData("passwd: \"s3cr3t-value\"", "passwd: \"[redacted:secret]\"")]
+    [InlineData("STORAGE_ACCESS_KEY: \"abcd1234efgh\"", "STORAGE_ACCESS_KEY: \"[redacted:secret]\"")]
+    [InlineData("private_key = 'abcd1234efgh'", "private_key = '[redacted:secret]'")]
     [InlineData("api_\u212Aey=abcdef123456", "api_\u212Aey=[redacted:secret]")] // a Kelvin sign is a k to a case-insensitive pattern
     public void A_value_assigned_to_a_secret_name_is_replaced_and_the_name_kept(string text, string expected) =>
-        Assert.Equal(expected, SecretRedactor.Redact(text));
+        Assert.Equal(expected, PrefilterCheck.Redact(text));
 
     [Theory]
     [InlineData("Host=db;Username=app;Password=Pa55word!;Database=registry", "Host=db;Username=app;Password=[redacted:connection-string-password];Database=registry")]
     [InlineData("Server=tcp:x.database.windows.net;User ID=sa;Pwd=Pa55word!", "Server=tcp:x.database.windows.net;User ID=sa;Pwd=[redacted:connection-string-password]")]
     public void A_connection_string_password_is_replaced(string text, string expected) =>
-        Assert.Equal(expected, SecretRedactor.Redact(text));
+        Assert.Equal(expected, PrefilterCheck.Redact(text));
 
     [Fact]
     public void A_password_in_a_url_is_replaced_and_the_user_and_host_kept() =>
         Assert.Equal(
             "postgres://app:[redacted:url-password]@db.internal:5432/registry",
-            SecretRedactor.Redact("postgres://app:Pa55word!@db.internal:5432/registry"));
+            PrefilterCheck.Redact("postgres://app:Pa55word!@db.internal:5432/registry"));
 
     [Fact]
     public void An_azure_storage_account_key_is_replaced()
     {
         var key = Repeat("aB3dE5fG7hJ9kL1mN3+/", 86) + "==";
 
-        var redacted = SecretRedactor.Redact($"DefaultEndpointsProtocol=https;AccountName=acct;AccountKey={key};EndpointSuffix=core.windows.net");
+        var redacted = PrefilterCheck.Redact($"DefaultEndpointsProtocol=https;AccountName=acct;AccountKey={key};EndpointSuffix=core.windows.net");
 
         Assert.Equal("DefaultEndpointsProtocol=https;AccountName=acct;AccountKey=[redacted:azure-storage-key];EndpointSuffix=core.windows.net", redacted);
     }
@@ -109,20 +113,20 @@ public sealed class SecretRedactorTests
     public void An_azure_sas_signature_is_replaced_and_the_rest_of_the_url_kept() =>
         Assert.Equal(
             "https://acct.blob.core.windows.net/c/b?sv=2022-11-02&se=2026-12-01&sig=[redacted:azure-sas-signature]",
-            SecretRedactor.Redact("https://acct.blob.core.windows.net/c/b?sv=2022-11-02&se=2026-12-01&sig=aB3dE5fG7hJ9kL1m%2BN3pQ5%3D"));
+            PrefilterCheck.Redact("https://acct.blob.core.windows.net/c/b?sv=2022-11-02&se=2026-12-01&sig=aB3dE5fG7hJ9kL1m%2BN3pQ5%3D"));
 
     [Fact]
     public void An_aws_secret_access_key_assigned_to_its_name_is_replaced() =>
         Assert.Equal(
             "aws_secret_access_key = [redacted:aws-secret-key]",
-            SecretRedactor.Redact("aws_secret_access_key = " + Repeat("wJalrXUtnFEMI/K7MDENG+bPxRfiCY", 40)));
+            PrefilterCheck.Redact("aws_secret_access_key = " + Repeat("wJalrXUtnFEMI/K7MDENG+bPxRfiCY", 40)));
 
     [Fact]
     public void A_secret_assigned_to_a_name_keeps_its_specific_type()
     {
         var token = "gh" + "p_" + Alnum36;
 
-        Assert.Equal("GITHUB_TOKEN=[redacted:github-token]", SecretRedactor.Redact($"GITHUB_TOKEN={token}"));
+        Assert.Equal("GITHUB_TOKEN=[redacted:github-token]", PrefilterCheck.Redact($"GITHUB_TOKEN={token}"));
     }
 
     [Fact]
@@ -131,7 +135,7 @@ public sealed class SecretRedactorTests
         var token = "gh" + "p_" + Alnum36;
         var key = "AK" + "IA" + Repeat("QX7RZ2MNB4", 16);
 
-        var redacted = SecretRedactor.Redact($"token {token} and key {key} and {token} again");
+        var redacted = PrefilterCheck.Redact($"token {token} and key {key} and {token} again");
 
         Assert.Equal("token [redacted:github-token] and key [redacted:aws-access-key] and [redacted:github-token] again", redacted);
     }
@@ -139,9 +143,9 @@ public sealed class SecretRedactorTests
     [Fact]
     public void Redacting_twice_changes_nothing_more()
     {
-        var once = SecretRedactor.Redact("password=hunter2-supersecret and gh" + "p_" + Alnum36);
+        var once = PrefilterCheck.Redact("password=hunter2-supersecret and gh" + "p_" + Alnum36);
 
-        Assert.Equal(once, SecretRedactor.Redact(once));
+        Assert.Equal(once, PrefilterCheck.Redact(once));
     }
 
     // False positives: things that look random but are not secrets, and must come through untouched.
@@ -160,13 +164,13 @@ public sealed class SecretRedactorTests
     [InlineData("eyJ alone is just the start of base64 JSON")]
     [InlineData("A plain sentence about parentUuid ordering and DNS records.")]
     public void Text_without_a_known_secret_is_unchanged(string text) =>
-        Assert.Equal(text, SecretRedactor.Redact(text));
+        Assert.Equal(text, PrefilterCheck.Redact(text));
 
     [Fact]
     public void Null_and_empty_pass_through()
     {
         Assert.Null(SecretRedactor.RedactOrNull(null));
-        Assert.Equal(string.Empty, SecretRedactor.Redact(string.Empty));
+        Assert.Equal(string.Empty, PrefilterCheck.Redact(string.Empty));
     }
 
     [Fact]
