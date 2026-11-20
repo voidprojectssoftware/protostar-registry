@@ -9,8 +9,8 @@
   "version": "0.2.0",
   "apiMajors": [1],
   "capabilities": ["skills", "stale-skill-push", "project-skills", "skill-rename", "skill-delete", "skill-tombstones",
-                   "sessions", "transcript-lookup", "redacted-read", "projects", "memory", "memory-content",
-                   "memory-base-versions", "search"]
+                   "sessions", "transcript-lookup", "transcript-prefix-lookup", "redacted-read", "projects", "memory",
+                   "memory-content", "memory-base-versions", "search"]
 }
 ```
 
@@ -44,6 +44,7 @@ be added or dropped unnoticed, and cannot stay listed after its feature is gone.
 | `skill-tombstones` | Deleted and renamed names are remembered. The list carries `removed` and each skill's `firstVersion`, and a push from a copy of a removed skill is refused with `409` and problem type `skill-deleted` or `skill-renamed`. |
 | `sessions` | Register machines (`/v1/machines`), register transcripts and append to them chunk by chunk, download them, read their parsed summaries, and list them. |
 | `transcript-lookup` | `POST /v1/transcripts/lookup` returns many transcripts' stored positions in one request. |
+| `transcript-prefix-lookup` | `GET /v1/transcripts?keyPrefix=7d3c&limit=11` returns the caller's transcripts whose key starts with `keyPrefix`, ignoring case, up to `limit`. A prefix shorter than 4 characters, or with a character no key can hold, is refused with `400`. |
 | `redacted-read` | A transcript download takes `redacted=true` and returns the content with known secrets replaced by markers. Every JSON line is still JSON. |
 | `projects` | Sessions are filed under projects shared across machines (ADR 0002). A folder can be resolved (`POST /v1/projects/resolve`), linked (`/link`) and unlinked (`/unlink`). |
 | `memory` | Push a project's changed and deleted memory files (`POST /v1/memory`), and list projects and files (`GET /v1/memory`, `/v1/memory/{projectId}`). |

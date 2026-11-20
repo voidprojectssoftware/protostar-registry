@@ -57,3 +57,42 @@ public sealed partial record TranscriptKey
     [GeneratedRegex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$")]
     private static partial Regex Pattern();
 }
+
+/// <summary>The start of a transcript key, as a person types it to find a session without the whole id.</summary>
+/// <remarks>
+/// <para>
+/// Matching ignores case, so the prefix is kept lowercased in <see cref="Value"/>; it is compared with the stored key
+/// lowercased the same way.
+/// </para>
+/// <para>
+/// It must be at least <see cref="MinLength"/> characters. Session keys are UUIDs, so four hex characters split them
+/// into 65,536 groups: a few sessions share a group even in a large backup, which is what a lookup that reports
+/// ambiguity wants. Fewer characters would match a sixteenth or more of every session, which is a listing, not a
+/// lookup. Four is also the shortest abbreviation git accepts for a commit.
+/// </para>
+/// </remarks>
+public sealed record TranscriptKeyPrefix
+{
+    /// <summary>The fewest characters a prefix may have.</summary>
+    public const int MinLength = 4;
+
+    private TranscriptKeyPrefix(string value) => Value = value;
+
+    /// <summary>The prefix, lowercased.</summary>
+    public string Value { get; }
+
+    /// <summary>
+    /// Validates <paramref name="raw"/>: <see cref="MinLength"/> to 200 of the characters a <see cref="TranscriptKey"/> may
+    /// hold, starting as a key may start.
+    /// </summary>
+    public static bool TryCreate(string? raw, out TranscriptKeyPrefix prefix)
+    {
+        prefix = null!;
+        if (raw is null || raw.Length < MinLength || !TranscriptKey.TryCreate(raw, out _))
+            return false;
+        prefix = new TranscriptKeyPrefix(raw.ToLowerInvariant());
+        return true;
+    }
+
+    public override string ToString() => Value;
+}

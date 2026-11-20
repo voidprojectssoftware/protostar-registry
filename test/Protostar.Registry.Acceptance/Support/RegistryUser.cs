@@ -60,14 +60,16 @@ public sealed class RegistryUser
     }
 
     /// <summary>Backs up a new Claude Code session in which the user typed <paramref name="prompt"/>, and returns its key.</summary>
-    public Task<string> BackUpSessionAsync(string prompt) =>
-        BackUpSessionAsync(key => Encoding.UTF8.GetBytes(PromptLine(key, prompt).ToJsonString() + "\n"));
+    public Task<string> BackUpSessionAsync(string prompt, string? key = null) =>
+        BackUpSessionAsync(k => Encoding.UTF8.GetBytes(PromptLine(k, prompt).ToJsonString() + "\n"), key);
 
     /// <summary>Backs up a new Claude Code session whose JSONL is what <paramref name="content"/> returns for its key, and returns the key.</summary>
-    public async Task<string> BackUpSessionAsync(Func<string, byte[]> content)
+    /// <param name="content">The session's JSONL, given its key.</param>
+    /// <param name="key">The session's key; a new random UUID when omitted.</param>
+    public async Task<string> BackUpSessionAsync(Func<string, byte[]> content, string? key = null)
     {
         var machineId = await EnsureMachineAsync();
-        var key = Guid.NewGuid().ToString();
+        key ??= Guid.NewGuid().ToString();
 
         var registered = await Http.PutAsJsonAsync($"/v1/transcripts/{Harness}/{key}", new
         {

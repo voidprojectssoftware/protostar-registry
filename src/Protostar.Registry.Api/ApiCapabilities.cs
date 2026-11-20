@@ -56,6 +56,12 @@ internal static class ApiCapabilities
     public const string TranscriptLookup = "transcript-lookup";
 
     /// <summary>
+    /// The transcript list takes <c>keyPrefix</c> (at least 4 characters) and returns the caller's transcripts whose key
+    /// starts with it, ignoring case, up to <c>limit</c>; a shorter or malformed prefix is refused with <c>400</c>.
+    /// </summary>
+    public const string TranscriptPrefixLookup = "transcript-prefix-lookup";
+
+    /// <summary>
     /// A transcript download takes <c>redacted=true</c> and returns the content with known secrets replaced by markers,
     /// every JSON line still JSON.
     /// </summary>
@@ -86,7 +92,7 @@ internal static class ApiCapabilities
     public static IReadOnlyList<string> All { get; } =
     [
         Skills, StaleSkillPush, ProjectSkills, SkillRename, SkillDelete, SkillTombstones,
-        Sessions, TranscriptLookup, RedactedRead,
+        Sessions, TranscriptLookup, TranscriptPrefixLookup, RedactedRead,
         Projects,
         Memory, MemoryContent, MemoryBaseVersions,
         Search,
