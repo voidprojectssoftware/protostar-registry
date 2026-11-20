@@ -46,6 +46,12 @@ public enum SkillPushError
 
     /// <summary>The project facts sent with a project skill are malformed.</summary>
     InvalidProject,
+
+    /// <summary>
+    /// The push was based on an older version than the current one: the skill changed on another machine first.
+    /// <see cref="SkillPushResult.CurrentVersion"/> says which version is current.
+    /// </summary>
+    StaleVersion,
 }
 
 /// <summary>
@@ -63,6 +69,9 @@ public sealed record SkillPushResult
 
     /// <summary>The project a project skill was filed under; <c>null</c> for a global skill or a failure.</summary>
     public ProjectResolution? Project { get; init; }
+
+    /// <summary>The skill's current version when a push was refused as <see cref="SkillPushError.StaleVersion"/>; <c>null</c> otherwise.</summary>
+    public int? CurrentVersion { get; init; }
 
     public SkillPushError Error { get; init; } = SkillPushError.None;
     public string? Message { get; init; }
@@ -88,6 +97,17 @@ public sealed record SkillPushResult
             SkillId = skillId,
             VersionId = versionId,
             FileCount = fileCount,
+            Project = project,
+        };
+
+    public static SkillPushResult Stale(string name, int currentVersion, string message, ProjectResolution? project = null) =>
+        new()
+        {
+            Status = SkillPushStatus.Failed,
+            Name = name,
+            Error = SkillPushError.StaleVersion,
+            CurrentVersion = currentVersion,
+            Message = message,
             Project = project,
         };
 

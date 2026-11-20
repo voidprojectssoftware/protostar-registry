@@ -16,8 +16,8 @@ public sealed class SkillTests
     private static SkillFileContent FileWith(string text) =>
         SkillFileContent.Create(RelativePath.FromTrusted("SKILL.md"), Encoding.UTF8.GetBytes(text));
 
-    private static SkillVersionPushOutcome Push(Skill skill, Guid pusher, string fileText) =>
-        skill.PushVersion(pusher, SkillManifest.Empty, new[] { FileWith(fileText) }, Now);
+    private static SkillVersionPushOutcome Push(Skill skill, Guid pusher, string fileText, int? baseVersion = null) =>
+        skill.PushVersion(pusher, SkillManifest.Empty, new[] { FileWith(fileText) }, Now, baseVersion);
 
     // ----- Create -----
 
@@ -362,6 +362,120 @@ public sealed class SkillTests
         Push(skill, creator, "v1");
 
         Assert.Empty(skill.DomainEvents);
+    }
+
+    // ----- Base version (stale pushes) -----
+
+    [Fact]
+    public void A_push_based_on_the_current_version_stores_the_next_version()
+    {
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+
+        var outcome = Push(skill, creator, "v2", baseVersion: 1);
+
+        Assert.False(outcome.IsUnchanged);
+        Assert.Equal(2, outcome.Version.VersionNumber);
+    }
+
+    [Fact]
+    public void A_push_based_on_an_older_version_is_refused_as_stale_with_both_versions()
+    {
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+        Push(skill, creator, "A's edit", baseVersion: 1);
+
+        var stale = Assert.Throws<SkillVersionStaleException>(() => Push(skill, creator, "B's edit", baseVersion: 1));
+
+        Assert.Equal(1, stale.BaseVersion);
+        Assert.Equal(2, stale.CurrentVersion);
+    }
+
+    [Fact]
+    public void A_stale_push_stores_nothing_and_raises_no_event()
+    {
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+        Push(skill, creator, "A's edit", baseVersion: 1);
+        skill.ClearDomainEvents();
+
+        Assert.Throws<SkillVersionStaleException>(() => Push(skill, creator, "B's edit", baseVersion: 1));
+
+        Assert.Equal(2, skill.Versions.Count);
+        Assert.Equal(2, skill.CurrentVersion!.VersionNumber);
+        Assert.Empty(skill.DomainEvents);
+    }
+
+    [Fact]
+    public void A_push_based_on_a_newer_version_than_the_current_one_is_refused()
+    {
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+
+        Assert.Throws<SkillVersionStaleException>(() => Push(skill, creator, "v2", baseVersion: 3));
+    }
+
+    [Fact]
+    public void A_copy_that_never_synced_is_refused_when_the_skill_already_has_versions()
+    {
+        // Base 0 means "this copy never synced a version": the registry's version would be overwritten unseen.
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+
+        var stale = Assert.Throws<SkillVersionStaleException>(() => Push(skill, creator, "made elsewhere", baseVersion: 0));
+
+        Assert.Equal(0, stale.BaseVersion);
+        Assert.Equal(1, stale.CurrentVersion);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    public void A_skill_with_no_version_yet_accepts_any_base(int baseVersion)
+    {
+        // Nothing to overwrite: a new skill, or one deleted while a copy elsewhere still records its old version.
+        var skill = NewSkill(out var creator);
+
+        var outcome = Push(skill, creator, "v1", baseVersion);
+
+        Assert.Equal(1, outcome.Version.VersionNumber);
+    }
+
+    [Fact]
+    public void Content_identical_to_the_current_version_is_unchanged_whatever_its_base()
+    {
+        // Both machines made the same edit: there is no conflict to report.
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+        Push(skill, creator, "same edit", baseVersion: 1);
+
+        var outcome = Push(skill, creator, "same edit", baseVersion: 1);
+
+        Assert.True(outcome.IsUnchanged);
+        Assert.Equal(2, outcome.Version.VersionNumber);
+    }
+
+    [Fact]
+    public void A_push_without_a_base_is_stored_on_top_as_before()
+    {
+        // Clients from before the rule send no base; they keep the old behaviour until upgraded.
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+        Push(skill, creator, "A's edit", baseVersion: 1);
+
+        var outcome = Push(skill, creator, "B's edit");
+
+        Assert.Equal(3, outcome.Version.VersionNumber);
+    }
+
+    [Fact]
+    public void The_creator_rule_is_checked_before_the_base()
+    {
+        var skill = NewSkill(out var creator);
+        Push(skill, creator, "v1");
+        Push(skill, creator, "v2");
+
+        Assert.Throws<SkillCreatorViolationException>(() => Push(skill, Guid.NewGuid(), "other", baseVersion: 1));
     }
 
     // ----- Creator enforcement -----
