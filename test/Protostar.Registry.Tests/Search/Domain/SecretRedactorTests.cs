@@ -78,6 +78,8 @@ public sealed class SecretRedactorTests
     [InlineData("{\"client_secret\": \"abcd1234efgh\"}", "{\"client_secret\": \"[redacted:secret]\"}")]
     [InlineData("export API_KEY=abcdef123456", "export API_KEY=[redacted:secret]")]
     [InlineData("secret = 'tops3cret'", "secret = '[redacted:secret]'")]
+    [InlineData("Api_Key=abcdef123456", "Api_Key=[redacted:secret]")]
+    [InlineData("api_\u212Aey=abcdef123456", "api_\u212Aey=[redacted:secret]")] // a Kelvin sign is a k to a case-insensitive pattern
     public void A_value_assigned_to_a_secret_name_is_replaced_and_the_name_kept(string text, string expected) =>
         Assert.Equal(expected, SecretRedactor.Redact(text));
 

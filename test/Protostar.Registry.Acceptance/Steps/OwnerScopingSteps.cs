@@ -72,6 +72,10 @@ public sealed class OwnerScopingSteps
     public Task ThenBobDownloadingAlicesSessionIsRefused(int status) =>
         AssertStatusAsync(Bob.Http.GetAsync($"/v1/transcripts/{RegistryUser.Harness}/{SessionKey}/content"), status);
 
+    [Then("bob reading alice's session redacted is refused with {int}")]
+    public Task ThenBobReadingAlicesSessionRedactedIsRefused(int status) =>
+        AssertStatusAsync(Bob.Http.GetAsync($"/v1/transcripts/{RegistryUser.Harness}/{SessionKey}/content?redacted=true"), status);
+
     [Then("bob looking up alice's session finds it unknown")]
     public async Task ThenBobLookingUpAlicesSessionFindsItUnknown()
     {

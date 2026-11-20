@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.RegularExpressions;
 
 namespace Protostar.Registry.Api.Search;
@@ -8,7 +9,8 @@ namespace Protostar.Registry.Api.Search;
 /// The registry keeps what clients upload verbatim (transcript chunks, memory versions), because reparsing and
 /// pulling need the original bytes, and those are already readable only by their owner. What the registry derives
 /// for people and agents to read (the search index, its snippets, the titles and first prompts listings show)
-/// goes through <see cref="Redact"/> first (registry#18).
+/// goes through <see cref="Redact"/> first (registry#18). A transcript read with <c>redacted=true</c> goes through it
+/// too, line by line, by way of <see cref="JsonLineRedactor"/>.
 /// </para>
 /// <para>
 /// The pattern set is curated, not exhaustive: each pattern matches a format with a recognisable shape (a fixed
@@ -24,8 +26,11 @@ namespace Protostar.Registry.Api.Search;
 /// </remarks>
 public static partial class SecretRedactor
 {
+    // Built once: Redact runs on every string value of a transcript read with redacted=true, so per-call setup counts.
+    private static readonly Pattern[] All = Patterns().ToArray();
+
     /// <summary>The type names a marker can carry, in the order the patterns run.</summary>
-    public static IReadOnlyList<string> Types { get; } = Patterns().Select(p => p.Type).ToList();
+    public static IReadOnlyList<string> Types { get; } = All.Select(p => p.Type).ToList();
 
     /// <summary>Returns <paramref name="text"/> with every known secret replaced by <c>[redacted:&lt;type&gt;]</c>.</summary>
     /// <remarks>Text with no secrets comes back unchanged (the same instance). Redacting already redacted text changes nothing.</remarks>
@@ -34,12 +39,14 @@ public static partial class SecretRedactor
         if (string.IsNullOrEmpty(text))
             return text;
 
-        foreach (var (type, regex, group) in Patterns())
+        foreach (var pattern in All)
         {
-            var marker = Marker(type);
-            text = group is null
-                ? regex.Replace(text, marker)
-                : regex.Replace(text, m => KeepAround(m, m.Groups[group], marker));
+            if (pattern.Needs is { } needs && text.AsSpan().IndexOfAny(needs) < 0)
+                continue;
+
+            text = pattern.Group is null
+                ? pattern.Regex.Replace(text, pattern.Marker)
+                : pattern.Regex.Replace(text, pattern.Evaluator);
         }
 
         return text;
@@ -58,26 +65,42 @@ public static partial class SecretRedactor
     /// <summary>The marker that replaces a secret of <paramref name="type"/>.</summary>
     public static string Marker(string type) => $"[redacted:{type}]";
 
-    // (type, pattern, group): with a group, only that group is replaced and the rest of the match (a name, an
-    // equals sign, a URL's user) stays readable. Order matters; see the class remarks.
-    private static IEnumerable<(string Type, Regex Regex, string? Group)> Patterns()
+    // A pattern, and the marker that replaces what it matches. With a group, only that group is replaced and the rest
+    // of the match (a name, an equals sign, a URL's user) stays readable. Needs, when set, holds literals of which the
+    // pattern's every match contains at least one: text holding none of them is skipped without running the regex.
+    // It is set only on the patterns that have no literal prefix of their own and so cost far more per byte (about
+    // 50 to 100 MB/s, against several GB/s for the rest), and must list every literal its pattern can require.
+    private sealed record Pattern(string Type, Regex Regex, string? Group = null, SearchValues<string>? Needs = null)
     {
-        yield return ("private-key", PrivateKey(), null);
-        yield return ("jwt", Jwt(), null);
-        yield return ("url-password", UrlPassword(), "secret");
-        yield return ("connection-string-password", ConnectionStringPassword(), "secret");
-        yield return ("azure-storage-key", AzureStorageKey(), "secret");
-        yield return ("azure-sas-signature", AzureSasSignature(), "secret");
-        yield return ("azure-client-secret", AzureClientSecret(), null);
-        yield return ("aws-access-key", AwsAccessKey(), null);
-        yield return ("aws-secret-key", AwsSecretKey(), "secret");
-        yield return ("github-token", GitHubToken(), null);
-        yield return ("anthropic-key", AnthropicKey(), null);
-        yield return ("openai-key", OpenAiKey(), null);
-        yield return ("google-api-key", GoogleApiKey(), null);
-        yield return ("slack-token", SlackToken(), null);
-        yield return ("stripe-key", StripeKey(), null);
-        yield return ("secret", SecretAssignment(), "secret");
+        public string Marker { get; } = SecretRedactor.Marker(Type);
+
+        public MatchEvaluator Evaluator { get; } = m => KeepAround(m, m.Groups[Group!], SecretRedactor.Marker(Type));
+    }
+
+    private static SearchValues<string> Literals(StringComparison comparison, params string[] values) => SearchValues.Create(values, comparison);
+
+    // Order matters; see the class remarks.
+    private static IEnumerable<Pattern> Patterns()
+    {
+        yield return new("private-key", PrivateKey());
+        yield return new("jwt", Jwt());
+        yield return new("url-password", UrlPassword(), "secret", Literals(StringComparison.Ordinal, "://"));
+        yield return new("connection-string-password", ConnectionStringPassword(), "secret", Literals(StringComparison.OrdinalIgnoreCase, "password", "pwd"));
+        yield return new("azure-storage-key", AzureStorageKey(), "secret");
+        yield return new("azure-sas-signature", AzureSasSignature(), "secret");
+        yield return new("azure-client-secret", AzureClientSecret(), Needs: Literals(StringComparison.Ordinal, "Q~"));
+        yield return new("aws-access-key", AwsAccessKey());
+        yield return new("aws-secret-key", AwsSecretKey(), "secret");
+        yield return new("github-token", GitHubToken());
+        yield return new("anthropic-key", AnthropicKey());
+        yield return new("openai-key", OpenAiKey());
+        yield return new("google-api-key", GoogleApiKey());
+        yield return new("slack-token", SlackToken());
+        yield return new("stripe-key", StripeKey());
+        // The stems stop before "key": under (?i) the pattern's k also matches the Kelvin sign (U+212A), which
+        // OrdinalIgnoreCase does not equate with k.
+        yield return new("secret", SecretAssignment(), "secret", Literals(StringComparison.OrdinalIgnoreCase,
+            "password", "passwd", "secret", "token", "api", "access", "private"));
     }
 
     private const RegexOptions Options = RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture;

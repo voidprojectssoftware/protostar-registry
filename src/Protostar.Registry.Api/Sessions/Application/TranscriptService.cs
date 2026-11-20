@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
@@ -5,6 +6,7 @@ using Npgsql;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Projects;
+using Protostar.Registry.Api.Search;
 
 namespace Protostar.Registry.Api.Sessions;
 
@@ -353,7 +355,13 @@ public sealed class TranscriptService
     }
 
     /// <summary>Writes the uncompressed bytes of <paramref name="chunks"/>, in order, to <paramref name="destination"/>.</summary>
-    public async Task CopyContentAsync(IReadOnlyList<TranscriptChunk> chunks, Stream destination, CancellationToken cancellationToken)
+    /// <remarks>
+    /// With <paramref name="redacted"/> each chunk passes through <see cref="JsonLineRedactor"/> before it is written,
+    /// one chunk at a time: chunks hold whole lines, so no line spans two, and memory stays bounded by
+    /// <see cref="Transcript.MaxChunkBytes"/> however long the transcript is. Without it the stored bytes are written
+    /// unchanged, as backups, restores and verification need them.
+    /// </remarks>
+    public async Task CopyContentAsync(IReadOnlyList<TranscriptChunk> chunks, bool redacted, Stream destination, CancellationToken cancellationToken)
     {
         foreach (var chunk in chunks)
         {
@@ -361,7 +369,17 @@ public sealed class TranscriptService
             await _blobs.CopyToAsync(chunk.BlobKey, compressed, cancellationToken);
             compressed.Position = 0;
             await using var gzip = new GZipStream(compressed, CompressionMode.Decompress);
-            await gzip.CopyToAsync(destination, cancellationToken);
+            if (!redacted)
+            {
+                await gzip.CopyToAsync(destination, cancellationToken);
+                continue;
+            }
+
+            using var raw = new MemoryStream();
+            await gzip.CopyToAsync(raw, cancellationToken);
+            var output = new ArrayBufferWriter<byte>((int)raw.Length);
+            JsonLineRedactor.Redact(raw.GetBuffer().AsSpan(0, (int)raw.Length), output);
+            await destination.WriteAsync(output.WrittenMemory, cancellationToken);
         }
     }
 
