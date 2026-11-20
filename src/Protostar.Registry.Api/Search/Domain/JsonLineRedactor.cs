@@ -9,16 +9,25 @@ namespace Protostar.Registry.Api.Search;
 /// <remarks>
 /// <para>
 /// Each line is read as JSON and <see cref="SecretRedactor.Redact"/> runs on the decoded text of every string value,
-/// so a secret written with JSON escapes (a quoted <c>\"password\": \"...\"</c> inside a tool result, a token
-/// spelled with <c>\u</c> escapes) is caught as the text it stands for. A string value that is itself a JSON document
-/// is redacted the same way, to any depth, so a secret behind two layers of escapes is caught too. Only a string that
-/// changed is re-encoded and spliced back; every other byte of the line, and every line with nothing to redact, comes
-/// out exactly as it went in. Property names are never changed (they are a harness's schema), but they count: a value
-/// is judged together with its name, so <c>"password": "..."</c> is caught as <c>password=...</c> would be in text.
+/// so a secret written with JSON escapes (a token spelled with <c>\u</c> escapes) is caught as the text it stands for.
+/// JSON held inside a string, at any depth of escaping and anywhere in the string, is caught too: a string that is
+/// itself a JSON document is redacted as JSON, and in any other string the assignment pattern reads a name and its
+/// value through escaped quotes, so <c>curl -d "{\"password\":\"...\"}"</c> in a Bash command loses its password.
+/// Only a string that changed is re-encoded and spliced back; every other byte of the line, and every line with
+/// nothing to redact, comes out exactly as it went in.
+/// </para>
+/// <para>
+/// Property names are never changed (they are a harness's schema), but they count. A string value under a name that
+/// says it is secret (<see cref="SecretRedactor.IsSecretName"/>) is replaced whole, spaces and punctuation included,
+/// so <c>{"password": "correct horse battery staple"}</c> becomes one marker. So is the <c>value</c> of an object
+/// whose <c>name</c> or <c>key</c> is such a name, the shape Kubernetes and many other tools give environment
+/// variables: <c>{"name": "DB_PASSWORD", "value": "..."}</c>. A value under any other name is still judged together
+/// with it, so <c>"AccountKey": "..."</c> is caught as <c>AccountKey=...</c> would be in text.
 /// </para>
 /// <para>
 /// A line that is not JSON (a corrupt line, a harness writing plain text) is redacted as plain text instead, since
-/// there is no JSON syntax in it to keep.
+/// there is no JSON syntax in it to keep. A string the redactor cannot finish scanning becomes
+/// <c>[redacted:unscannable]</c>, so the line stays JSON and the string is never served as it was.
 /// </para>
 /// </remarks>
 public static class JsonLineRedactor
@@ -51,9 +60,10 @@ public static class JsonLineRedactor
     }
 
     // A value is redacted alone, then once more as the assignment "name=value" when it has a property name, so a
-    // secret whose only sign is its name ({"password": "hunter2"}) is caught as it is in text. The second pass counts
-    // only when the secret it finds starts the value; otherwise (a name that is itself redacted, a value starting with
-    // a quote or a space that the assignment pattern would read past) the value redacted alone stands.
+    // secret whose only sign is its name is caught as it is in text. A name that says the value is secret replaces the
+    // value whole: with the type the assignment found (aws_secret_access_key keeps aws-secret-key), else as a secret.
+    // Values under four characters are left, as in text. Under any other name the assignment counts only when the
+    // secret it finds starts the value.
     private static string RedactValue(string? name, string text)
     {
         var redacted = RedactText(text);
@@ -62,10 +72,15 @@ public static class JsonLineRedactor
 
         var prefix = name + "=";
         var assignment = SecretRedactor.Redact(prefix + redacted);
-        return assignment.StartsWith(prefix + "[redacted:", StringComparison.Ordinal) && !redacted.StartsWith("[redacted:", StringComparison.Ordinal)
-            ? assignment[prefix.Length..]
-            : redacted;
+        var named = assignment.StartsWith(prefix + "[redacted:", StringComparison.Ordinal) && !redacted.StartsWith("[redacted:", StringComparison.Ordinal);
+        if (SecretRedactor.IsSecretName(name) && !IsOneMarker(redacted) && text.AsSpan().Trim().Length >= 4)
+            return named ? assignment[prefix.Length..(assignment.IndexOf(']', prefix.Length) + 1)] : SecretRedactor.Marker("secret");
+
+        return named ? assignment[prefix.Length..] : redacted;
     }
+
+    private static bool IsOneMarker(string text) =>
+        text.StartsWith("[redacted:", StringComparison.Ordinal) && text.IndexOf(']') == text.Length - 1;
 
     private static bool LooksLikeJson(string text)
     {
@@ -98,12 +113,22 @@ public static class JsonLineRedactor
         {
             var reader = new Utf8JsonReader(line, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Disallow });
             string? name = null;
+            // For each open object (and, to keep the stack in step, array), the string under its "name" or "key"
+            // property so far: what its "value" is called.
+            var valueNames = new Stack<string?>();
             while (reader.Read())
             {
-                if (reader.TokenType == JsonTokenType.PropertyName)
+                switch (reader.TokenType)
                 {
-                    name = reader.GetString();
-                    continue;
+                    case JsonTokenType.PropertyName:
+                        name = reader.GetString();
+                        continue;
+                    case JsonTokenType.StartObject or JsonTokenType.StartArray:
+                        valueNames.Push(null);
+                        break;
+                    case JsonTokenType.EndObject or JsonTokenType.EndArray:
+                        valueNames.Pop();
+                        break;
                 }
 
                 if (reader.TokenType != JsonTokenType.String)
@@ -113,6 +138,17 @@ public static class JsonLineRedactor
                 }
 
                 var text = reader.GetString()!;
+                // A string with a property name is a member of the object on top of the stack.
+                if (string.Equals(name, "name", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "key", StringComparison.OrdinalIgnoreCase))
+                {
+                    valueNames.Pop();
+                    valueNames.Push(text);
+                }
+                else if (string.Equals(name, "value", StringComparison.OrdinalIgnoreCase) && valueNames.Peek() is { } valueName && SecretRedactor.IsSecretName(valueName))
+                {
+                    name = valueName;
+                }
+
                 var redacted = RedactValue(name, text);
                 name = null;
                 if (!ReferenceEquals(redacted, text))

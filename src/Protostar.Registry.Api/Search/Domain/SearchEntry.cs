@@ -29,9 +29,10 @@ public sealed class SearchEntry
     /// <summary>The version of the text extraction and redaction that made an entry.</summary>
     /// <remarks>
     /// Bump it whenever what is indexed changes: a parser's text extraction or the redactor's patterns. Entries of an
-    /// older version count as missing, so the backfill re-indexes them.
+    /// older version count as missing, so the backfill re-indexes them. 2: the redactor replaces a secret-named value
+    /// whole and reads names through escaped quotes (registry#78, #79), and redacts bearer tokens.
     /// </remarks>
-    public const int CurrentIndexVersion = 1;
+    public const int CurrentIndexVersion = 2;
 
     /// <summary>The most characters of text one entry holds.</summary>
     public const int MaxSegmentLength = 32_000;

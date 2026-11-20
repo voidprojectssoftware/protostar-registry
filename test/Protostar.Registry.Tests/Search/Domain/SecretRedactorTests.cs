@@ -148,6 +148,72 @@ public sealed class SecretRedactorTests
         Assert.Equal(once, PrefilterCheck.Redact(once));
     }
 
+    // registry#78: JSON inside a string reaches the redactor with its quotes still escaped, at any depth.
+    [Theory]
+    [InlineData("not json \\\"password\\\": \\\"hunter2-supersecret\\\"", "not json \\\"password\\\": \\\"[redacted:secret]\\\"")]
+    [InlineData("curl -X POST -d \"{\\\"password\\\":\\\"hunter2-supersecret\\\"}\" https://x", "curl -X POST -d \"{\\\"password\\\":\\\"[redacted:secret]\\\"}\" https://x")]
+    [InlineData("var body = \"{\\\"api_key\\\": \\\"abcd1234efgh5678\\\"}\";", "var body = \"{\\\"api_key\\\": \\\"[redacted:secret]\\\"}\";")]
+    [InlineData("{\\\\\\\"password\\\\\\\":\\\\\\\"hunter2-supersecret\\\\\\\"}", "{\\\\\\\"password\\\\\\\":\\\\\\\"[redacted:secret]\\\\\\\"}")]
+    [InlineData("echo '{\"token\": \"abcd1234efgh\"}' | jq", "echo '{\"token\": \"[redacted:secret]\"}' | jq")]
+    [InlineData("ran {\\u0022password\\u0022:\\u0022hunter2 supersecret\\u0022}", "ran {\\u0022password\\u0022:\\u0022[redacted:secret]\\u0022}")]
+    public void A_secret_in_json_escaped_inside_text_is_replaced(string text, string expected) =>
+        Assert.Equal(expected, PrefilterCheck.Redact(text));
+
+    // registry#79: what a secret's name assigns is the secret, all of it, spaces and punctuation included.
+    [Theory]
+    [InlineData("password: \"correct horse battery staple\"", "password: \"[redacted:secret]\"")]
+    [InlineData("{\"password\":\"correct horse battery staple\"}", "{\"password\":\"[redacted:secret]\"}")]
+    [InlineData("secret = 'p4ss;w0rd, tail'", "secret = '[redacted:secret]'")]
+    [InlineData("password=\"ab\\\"cd efgh\" next", "password=\"[redacted:secret]\" next")]
+    [InlineData("password=p4ss;w0rd-tail", "password=[redacted:secret]")]
+    [InlineData("PASSWORD=correct horse battery staple", "PASSWORD=[redacted:secret]")]
+    [InlineData("api_key: c0rrect horse battery\nnext line", "api_key: [redacted:secret]\nnext line")]
+    [InlineData("{\"password\": \" hunter2-supersecret\"}", "{\"password\": \"[redacted:secret]\"}")]
+    public void A_value_assigned_to_a_secret_name_is_replaced_whole(string text, string expected) =>
+        Assert.Equal(expected, PrefilterCheck.Redact(text));
+
+    [Fact]
+    public void A_password_holding_a_semicolon_in_a_connection_string_is_replaced_whole() =>
+        Assert.Equal(
+            "Host=db;Password=[redacted:connection-string-password];Database=registry",
+            PrefilterCheck.Redact("Host=db;Password=p4ss;w0rd;Database=registry"));
+
+    [Theory]
+    [InlineData("{\"name\": \"DB_PASSWORD\", \"value\": \"s3cr3t value\"}", "{\"name\": \"DB_PASSWORD\", \"value\": \"[redacted:secret]\"}")]
+    [InlineData("[{\\\"name\\\":\\\"API_TOKEN\\\",\\\"value\\\":\\\"abcd1234efgh\\\"}]", "[{\\\"name\\\":\\\"API_TOKEN\\\",\\\"value\\\":\\\"[redacted:secret]\\\"}]")]
+    public void A_name_value_pair_naming_a_secret_has_its_value_replaced(string text, string expected) =>
+        Assert.Equal(expected, PrefilterCheck.Redact(text));
+
+    [Theory]
+    [InlineData("Authorization: Bearer {0}", "Authorization: Bearer [redacted:bearer-token]")]
+    [InlineData("curl -H \"Authorization: Bearer {0}\" https://api.example.com", "curl -H \"Authorization: Bearer [redacted:bearer-token]\" https://api.example.com")]
+    [InlineData("authorization: bearer {0}", "authorization: bearer [redacted:bearer-token]")]
+    public void An_opaque_bearer_token_is_replaced(string around, string expected) =>
+        Assert.Equal(expected, PrefilterCheck.Redact(string.Format(around, "ya29." + Repeat("a0B1c2D3e4F5g6H7", 64))));
+
+    [Fact]
+    public void A_github_token_followed_by_an_underscore_is_replaced_and_the_rest_kept()
+    {
+        var token = "gh" + "p_" + Alnum36;
+
+        Assert.Equal("[redacted:github-token]_backup", PrefilterCheck.Redact(token + "_backup"));
+        Assert.Equal("GITHUB_TOKEN_[redacted:github-token]", PrefilterCheck.Redact("GITHUB_TOKEN_" + token));
+    }
+
+    [Theory]
+    [InlineData("password", true)]
+    [InlineData("DB_PASSWORD", true)]
+    [InlineData("accessToken", true)]
+    [InlineData("x-api-key", true)]
+    [InlineData("client_secret", true)]
+    [InlineData("aws_secret_access_key", true)]
+    [InlineData("max_tokens", false)]
+    [InlineData("secretName", false)]
+    [InlineData("name", false)]
+    [InlineData("token_type", false)]
+    public void A_name_is_a_secret_name_when_it_ends_with_a_secret_word(string name, bool expected) =>
+        Assert.Equal(expected, SecretRedactor.IsSecretName(name));
+
     // False positives: things that look random but are not secrets, and must come through untouched.
     [Theory]
     [InlineData("commit 9fceb02d0ae598e95dc970b74767f19372d61af8 fixed it")]
@@ -163,6 +229,9 @@ public sealed class SecretRedactorTests
     [InlineData("AKIA is the prefix AWS uses for access key ids")]
     [InlineData("eyJ alone is just the start of base64 JSON")]
     [InlineData("A plain sentence about parentUuid ordering and DNS records.")]
+    [InlineData("Bearer authentication is described in RFC 6750")]
+    [InlineData("the password: prompt, then the token: field")]
+    [InlineData("{\"password\": \"abc\"}")]
     public void Text_without_a_known_secret_is_unchanged(string text) =>
         Assert.Equal(text, PrefilterCheck.Redact(text));
 
