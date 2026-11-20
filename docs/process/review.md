@@ -10,7 +10,8 @@ CI runs these. If they are red, the work is not ready for review.
 
 - build: `dotnet build protostar-registry.sln`
 - unit tests (domain only, no host or database): `dotnet test test/Protostar.Registry.Tests`
-- EF migrations compile with the model (a missing migration shows as a pending model change)
+- acceptance scenarios (the real API over Postgres and RustFS in Docker): `dotnet test test/Protostar.Registry.Acceptance`
+- EF migrations compile with the model (a missing migration shows as a pending model change, which the acceptance migrations scenario fails on)
 
 Never ask a reviewer to run these by hand. If a mechanical check is missing,
 adding it is cheaper than reviewing for it forever.

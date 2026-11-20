@@ -15,19 +15,38 @@ Aspire.
 - `src/Protostar.Registry.AppHost/` — Aspire orchestrator (Postgres + the API).
 - `src/Protostar.Registry.ServiceDefaults/` — shared Aspire OTel / health / resilience defaults.
 - `test/Protostar.Registry.Tests/` — unit tests asserting domain behavior in isolation (value objects, policies, aggregate behavior); no host, no database.
+- `test/Protostar.Registry.Acceptance/` — BDD acceptance scenarios (Reqnroll) against the real API over a real Postgres and object store in Docker.
 
 ## Build and test
 
 ```bash
 dotnet build protostar-registry.sln                                  # build everything
-dotnet test test/Protostar.Registry.Tests/...                        # unit tests
+dotnet test test/Protostar.Registry.Tests                            # unit tests
+dotnet test test/Protostar.Registry.Acceptance                       # acceptance scenarios (needs Docker)
+dotnet test                                                          # both, as CI's build-test job runs them
 ```
 
-These are fast, isolated unit tests: they assert the domain model's behavior directly (value objects,
+The unit tests are fast and isolated: they assert the domain model's behavior directly (value objects,
 policies, aggregate behavior) with no web host, no `WebApplicationFactory`, and no database. They are
 authored contract-first, derived from each type's documented contract rather than its implementation.
-End-to-end, user-focused scenarios (the full push path through HTTP and Postgres) belong in the BDD
-acceptance layer, tracked separately; reach for a real Postgres (e.g. Testcontainers) there, not here.
+
+The acceptance scenarios are end to end and user-focused: each `.feature` file in
+`test/Protostar.Registry.Acceptance/Features/` states a claim about the registry in the user's words, and its
+steps drive the real API over HTTP. Put a claim there when it is only true of the whole stack: owner
+scoping, races, migrations, the search SQL, anything that depends on Postgres or the object store. Put it in
+the unit tests when the domain model alone decides it. How the suite runs:
+
+- One Postgres 18 and one RustFS 1.0.5 container per test run (Testcontainers; the images the AppHost and the
+  production compose file use), labelled `dev.protostar.registry-acceptance` and removed at the end, or by
+  Testcontainers' Ryuk reaper if the run dies.
+- Every scenario gets its own empty database and bucket, and its own in-process API host
+  (`WebApplicationFactory`), so scenarios are independent and run in any order.
+- The host runs as `Production`: token certificates from PFX files (generated for the run), migrations at
+  startup, no Development sign-in. Users sign in through the CLI's real OAuth flow (`/connect/authorize` with
+  PKCE, then `/connect/token`); only the GitHub leg is replaced, by a test-only endpoint that exists in the
+  test assembly alone (`Support/AcceptanceSignIn.cs`). Never add a test sign-in path to the API.
+- No sleeps: wait on the thing itself (container health, a response). The registry indexes search and applies
+  migrations before it answers, so a scenario can assert straight after the request.
 
 EF Core migrations:
 
