@@ -37,6 +37,29 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
 
     public DbSet<ProjectKey> ProjectKeys => Set<ProjectKey>();
 
+    /// <summary>Whether the save in progress came from <see cref="SaveChangesRacingAsync"/>.</summary>
+    internal bool SavingRacingInsert { get; private set; }
+
+    /// <summary>Saves the unit of work for a caller that handles a unique violation as a lost insert race.</summary>
+    /// <remarks>
+    /// <see cref="HandledRaceLogging"/> logs that save's unique violation at Debug instead of Error, because the
+    /// caller recovers from it. Any other failure of the save, and a unique violation in any other save, still
+    /// logs at Error. Use it only around a save whose unique violation the caller catches.
+    /// </remarks>
+    public async Task<int> SaveChangesRacingAsync(CancellationToken cancellationToken)
+    {
+        SavingRacingInsert = true;
+        try
+        {
+            return await SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            // Aspire pools this context, so the flag must not outlive the save.
+            SavingRacingInsert = false;
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

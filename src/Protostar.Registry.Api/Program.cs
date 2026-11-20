@@ -22,9 +22,10 @@ builder.AddServiceDefaults();
 
 // Postgres + EF Core. Aspire injects the "registrydb" connection string. UseOpenIddict() adds
 // OpenIddict's tables (applications, authorizations, scopes, tokens) to the same context.
+// LogHandledRacesAtDebug keeps insert races the services recover from out of the Error log.
 builder.AddNpgsqlDbContext<RegistryDbContext>(
     "registrydb",
-    configureDbContextOptions: options => options.UseOpenIddict());
+    configureDbContextOptions: options => options.UseOpenIddict().LogHandledRacesAtDebug());
 
 // OpenIddict: the registry's own OAuth2/OIDC authorization server. It owns the User records and
 // mints the tokens the CLI stores; the login step is federated to GitHub below.
