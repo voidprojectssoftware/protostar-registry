@@ -73,6 +73,12 @@ internal sealed class RegistryDocumentTransformer : IOpenApiDocumentTransformer
             },
             new()
             {
+                Name = ApiTags.Search,
+                Description = "Find sessions and memory by what they say, across every machine and project. Known secrets are " +
+                    "redacted before anything is indexed.",
+            },
+            new()
+            {
                 Name = ApiTags.OAuth,
                 Description = "OAuth 2.0 and OpenID Connect protocol endpoints. Clients normally reach these through an OIDC library " +
                     "configured from the discovery document, not by hand.",
@@ -97,6 +103,7 @@ internal static class ApiTags
     public const string Transcripts = "Transcripts";
     public const string Projects = "Projects";
     public const string Memory = "Memory";
+    public const string Search = "Search";
     public const string OAuth = "OAuth and OpenID Connect";
     public const string SignIn = "Sign-in pages";
 }

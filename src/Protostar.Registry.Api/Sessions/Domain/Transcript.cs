@@ -147,7 +147,8 @@ public sealed class Transcript : AggregateRoot
     /// </summary>
     /// <remarks>
     /// Revision <see cref="Revision"/> + 1 at offset 0 starts a new revision: the length and summary reset and
-    /// the chunk becomes its first. Any other revision, or an offset other than <see cref="Length"/>, is
+    /// the chunk becomes its first. Raises <see cref="TranscriptChunkAppended"/> with the chunk's readable text.
+    /// Any other revision, or an offset other than <see cref="Length"/>, is
     /// rejected with the current position so the client can resume from it.
     /// </remarks>
     public TranscriptAppendOutcome Append(
@@ -176,8 +177,10 @@ public sealed class Transcript : AggregateRoot
         var chunk = TranscriptChunk.Create(Id, Revision, Length, content, blobKey, storedBytes, machineId, now);
         Length += content.Length;
         ChunkCount++;
-        Summary = Summary.Add(parser.Parse(content));
+        var facts = parser.Parse(content);
+        Summary = Summary.Add(facts);
         UpdatedAt = now;
+        RaiseDomainEvent(new TranscriptChunkAppended(OwnerId, Id, chunk.Id, chunk.Offset == 0, machineId, facts.Text));
 
         return TranscriptAppendOutcome.Appended(chunk);
     }

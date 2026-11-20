@@ -68,7 +68,8 @@ public sealed class MemoryFile : AggregateRoot
     /// <exception cref="MemoryFileTooLargeException">The content is over <see cref="MemoryFileSizePolicy.MaxBytes"/>.</exception>
     /// <remarks>
     /// Content equal to any earlier version, from any machine, points the copy at that version instead of adding one.
-    /// A copy that was marked deleted and is sent again is present again.
+    /// A copy that was marked deleted and is sent again is present again. Raises <see cref="MemoryFileChanged"/> when
+    /// anything changed.
     /// </remarks>
     public MemoryFileRecorded Record(Guid machineId, string folder, byte[] content, DateTimeOffset now, int? baseVersion = null)
     {
@@ -83,25 +84,24 @@ public sealed class MemoryFile : AggregateRoot
             var knownBase = _versions.Any(v => v.Number == baseVersion) ? baseVersion : null;
             version = MemoryFileVersion.Create(Id, _versions.Count == 0 ? 1 : _versions.Max(v => v.Number) + 1, content, hash, machineId, knownBase, now);
             _versions.Add(version);
-            UpdatedAt = now;
         }
 
         var copy = CopyOn(machineId, folder);
+        var copyChanged = copy is null || copy.Holds(version.Number, now);
         if (copy is null)
-        {
             _copies.Add(MemoryFileCopy.Create(Id, machineId, folder, version.Number, now));
-            UpdatedAt = now;
-        }
-        else if (copy.Holds(version.Number, now))
+
+        if (change != MemoryFileChange.Unchanged || copyChanged)
         {
             UpdatedAt = now;
+            RaiseDomainEvent(new MemoryFileChanged(OwnerId, Id));
         }
 
         return new MemoryFileRecorded(change, version.Number);
     }
 
     /// <summary>Marks the file deleted in <paramref name="folder"/> on <paramref name="machineId"/>, keeping it and its versions.</summary>
-    /// <returns><see cref="MemoryFileChange.MarkedDeleted"/>, or <see cref="MemoryFileChange.Unchanged"/> when it already was.</returns>
+    /// <returns><see cref="MemoryFileChange.MarkedDeleted"/> (raising <see cref="MemoryFileChanged"/>), or <see cref="MemoryFileChange.Unchanged"/> when it already was.</returns>
     /// <remarks>
     /// A checkout that never sent the file got it from another machine (a pull) and deleted it. It gets a copy, at
     /// the current version and marked deleted, so the other machines are told where it was deleted and a file
@@ -120,6 +120,7 @@ public sealed class MemoryFile : AggregateRoot
             return new MemoryFileRecorded(MemoryFileChange.Unchanged, copy.VersionNumber);
 
         UpdatedAt = now;
+        RaiseDomainEvent(new MemoryFileChanged(OwnerId, Id));
         return new MemoryFileRecorded(MemoryFileChange.MarkedDeleted, copy.VersionNumber);
     }
 

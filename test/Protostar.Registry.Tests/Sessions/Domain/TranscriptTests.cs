@@ -296,4 +296,96 @@ public sealed class ClaudeCodeTranscriptParserTests
         Assert.Equal(DateTimeOffset.Parse("2026-11-10T09:00:00Z"), summary.LastActivityAt);
         Assert.Equal(5, summary.Lines);
     }
+
+    private const string ToolCallReply =
+        """{"type":"assistant","timestamp":"2026-11-09T22:49:35.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"private musing"},{"type":"text","text":"Let me look"},{"type":"tool_use","id":"t1","name":"Grep","input":{"pattern":"needle-in-input"}}]}}""";
+
+    private const string MetaPrompt =
+        """{"type":"user","isMeta":true,"timestamp":"2026-11-09T22:49:29.000Z","message":{"role":"user","content":"<command-name>injected</command-name>"}}""";
+
+    private const string Title = """{"type":"ai-title","aiTitle":"CRM spec"}""";
+
+    [Fact]
+    public void Readable_text_is_the_title_prompts_replies_and_tool_names_one_per_line()
+    {
+        var facts = Parse(Title, Prompt, ToolCallReply, ToolResult, Reply);
+
+        Assert.Equal(["CRM spec", "Spec out the CRM", "Let me look", "Tool: Grep", "Sure"], facts.Text!.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
+    public void Readable_text_leaves_out_tool_inputs_results_thinking_and_injected_lines()
+    {
+        var text = Parse(MetaPrompt, ToolCallReply, ToolResult).Text!;
+
+        Assert.DoesNotContain("needle-in-input", text);
+        Assert.DoesNotContain("private musing", text);
+        Assert.DoesNotContain("injected", text);
+        Assert.DoesNotContain("ok", text.Split(Environment.NewLine));
+    }
+
+    [Fact]
+    public void Readable_text_includes_every_text_block_of_a_prompt()
+    {
+        var prompt = """{"type":"user","message":{"role":"user","content":[{"type":"text","text":"first part"},{"type":"text","text":"second part"}]}}""";
+
+        Assert.Equal("first part" + Environment.NewLine + "second part" + Environment.NewLine, Parse(prompt).Text);
+    }
+}
+
+/// <summary>Contract tests for the <see cref="TranscriptChunkAppended"/> event the append raises.</summary>
+public sealed class TranscriptChunkAppendedTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 11, 12, 10, 0, 0, TimeSpan.Zero);
+
+    private static Transcript NewSession()
+    {
+        HarnessId.TryCreate("claude-code", out var harness);
+        TranscriptKey.TryCreate("6f83525b-790f-4654-944d-ba3b0c96453e", out var key);
+        return Transcript.Register(Guid.NewGuid(), harness, key, TranscriptKind.Session, null, Guid.NewGuid(), "/s.jsonl", null, Now);
+    }
+
+    private static readonly byte[] Chunk = Encoding.UTF8.GetBytes(
+        """{"type":"user","message":{"role":"user","content":"find parentUuid ordering"}}""" + "\n");
+
+    [Fact]
+    public void Appending_raises_the_event_with_the_chunk_and_its_readable_text()
+    {
+        var t = NewSession();
+        var machine = Guid.NewGuid();
+
+        var chunk = t.Append(1, 0, Chunk, "blob", 10, machine, new ClaudeCodeTranscriptParser(), Now).Chunk!;
+
+        var raised = Assert.IsType<TranscriptChunkAppended>(Assert.Single(t.DomainEvents));
+        Assert.Equal(new TranscriptChunkAppended(t.OwnerId, t.Id, chunk.Id, true, machine, "find parentUuid ordering" + Environment.NewLine), raised);
+    }
+
+    [Fact]
+    public void A_later_chunk_does_not_start_a_revision()
+    {
+        var t = NewSession();
+        t.Append(1, 0, Chunk, "blob", 10, Guid.NewGuid(), new ClaudeCodeTranscriptParser(), Now);
+
+        t.Append(1, Chunk.Length, Chunk, "blob2", 10, Guid.NewGuid(), new ClaudeCodeTranscriptParser(), Now);
+
+        Assert.False(t.DomainEvents.OfType<TranscriptChunkAppended>().Last().StartsRevision);
+    }
+
+    [Fact]
+    public void A_rejected_chunk_raises_nothing()
+    {
+        var t = NewSession();
+
+        t.Append(1, 5, Chunk, "blob", 10, Guid.NewGuid(), new ClaudeCodeTranscriptParser(), Now);
+
+        Assert.Empty(t.DomainEvents);
+    }
+
+    [Fact]
+    public void The_event_text_never_appears_when_the_event_is_printed()
+    {
+        var raised = new TranscriptChunkAppended(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), true, Guid.NewGuid(), "a pasted secret value");
+
+        Assert.DoesNotContain("pasted secret", raised.ToString());
+    }
 }

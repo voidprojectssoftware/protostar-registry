@@ -75,6 +75,10 @@ public sealed record TranscriptFacts
     public int AssistantMessages { get; init; }
     public int Lines { get; init; }
     public int MalformedLines { get; init; }
+
+    /// <summary>The chunk's readable text for the search index, one message per line, not redacted; <c>null</c> when the parser extracts none.</summary>
+    /// <remarks>Not folded into <see cref="TranscriptSummary"/>: it goes to the index with the chunk and is not kept on the transcript.</remarks>
+    public string? Text { get; init; }
 }
 
 /// <summary>Reads one harness's transcript format into <see cref="TranscriptFacts"/>.</summary>

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace Protostar.Registry.Api.Sessions;
@@ -9,6 +10,12 @@ namespace Protostar.Registry.Api.Sessions;
 /// (<c>aiTitle</c>). A <c>user</c> line whose content is tool results, or that is marked <c>isMeta</c>, is not
 /// counted as a prompt. Every other type is counted as a line and otherwise ignored, so new record types
 /// never break parsing.
+/// <para>
+/// The readable text (<see cref="TranscriptFacts.Text"/>) is the session title, what the user typed, the
+/// assistant's text replies, and the names of the tools it called, one per line. Tool inputs and results,
+/// thinking, and harness-injected lines are left out: they are bulky, rarely what someone searches for, and
+/// the likeliest place for pasted data.
+/// </para>
 /// </remarks>
 public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
 {
@@ -19,18 +26,19 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
     public TranscriptFacts Parse(ReadOnlySpan<byte> content)
     {
         var facts = new TranscriptFacts();
+        var text = new StringBuilder();
         while (!content.IsEmpty)
         {
             var end = content.IndexOf((byte)'\n');
             var line = end < 0 ? content : content[..end];
             content = end < 0 ? [] : content[(end + 1)..];
-            facts = Read(line, facts with { Lines = facts.Lines + 1 });
+            facts = Read(line, facts with { Lines = facts.Lines + 1 }, text);
         }
 
-        return facts;
+        return facts with { Text = text.ToString() };
     }
 
-    private static TranscriptFacts Read(ReadOnlySpan<byte> line, TranscriptFacts facts)
+    private static TranscriptFacts Read(ReadOnlySpan<byte> line, TranscriptFacts facts, StringBuilder text)
     {
         if (line.TrimEnd((byte)'\r').Trim((byte)' ').IsEmpty)
             return facts;
@@ -45,7 +53,12 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
 
             var type = String(root, "type");
             if (type == "ai-title")
-                return String(root, "aiTitle") is { Length: > 0 } title ? facts with { Title = title } : facts;
+            {
+                if (String(root, "aiTitle") is not { Length: > 0 } title)
+                    return facts;
+                text.AppendLine(title);
+                return facts with { Title = title };
+            }
 
             if (type is not ("user" or "assistant"))
                 return facts;
@@ -64,11 +77,15 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
             };
 
             if (type == "assistant")
+            {
+                AppendReply(root, text);
                 return facts with { AssistantMessages = facts.AssistantMessages + 1 };
+            }
 
             if (PromptText(root) is not { } prompt)
                 return facts;
 
+            AppendPrompt(root, text);
             return facts with
             {
                 UserMessages = facts.UserMessages + 1,
@@ -105,6 +122,53 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
         }
 
         return null;
+    }
+
+    // Every text block of a prompt the user typed (PromptText returns only the first).
+    private static void AppendPrompt(JsonElement root, StringBuilder text)
+    {
+        var content = root.GetProperty("message").GetProperty("content");
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            text.AppendLine(content.GetString());
+            return;
+        }
+
+        foreach (var block in content.EnumerateArray())
+        {
+            if (String(block, "type") == "text" && String(block, "text") is { Length: > 0 } t)
+                text.AppendLine(t);
+        }
+    }
+
+    // The assistant's text blocks, and its tool calls by name only.
+    private static void AppendReply(JsonElement root, StringBuilder text)
+    {
+        if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("content", out var content))
+            return;
+
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            text.AppendLine(content.GetString());
+            return;
+        }
+
+        if (content.ValueKind != JsonValueKind.Array)
+            return;
+
+        foreach (var block in content.EnumerateArray())
+        {
+            switch (String(block, "type"))
+            {
+                case "text" when String(block, "text") is { Length: > 0 } t:
+                    text.AppendLine(t);
+                    break;
+                case "tool_use" when String(block, "name") is { Length: > 0 } name:
+                    text.Append("Tool: ").AppendLine(name);
+                    break;
+            }
+        }
     }
 
     private static string? String(JsonElement element, string name) =>

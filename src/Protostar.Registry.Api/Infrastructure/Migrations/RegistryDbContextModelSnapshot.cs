@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using NpgsqlTypes;
 using Protostar.Registry.Api.Infrastructure;
 
 #nullable disable
@@ -424,6 +425,71 @@ namespace Protostar.Registry.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("ProjectKeys");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Search.SearchEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ChunkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("IndexVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("IndexedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MachineId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("MemoryFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("MemoryFileUpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<NpgsqlTsVector>("SearchVector")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("tsvector")
+                        .HasComputedColumnSql("to_tsvector('english', \"Text\")", true);
+
+                    b.Property<int>("Segment")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("TranscriptId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId");
+
+                    b.HasIndex("SearchVector");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchVector"), "GIN");
+
+                    b.HasIndex("TranscriptId");
+
+                    b.HasIndex("ChunkId", "Segment")
+                        .IsUnique();
+
+                    b.HasIndex("MemoryFileId", "Segment")
+                        .IsUnique();
+
+                    b.ToTable("SearchEntries");
                 });
 
             modelBuilder.Entity("Protostar.Registry.Api.Sessions.Machine", b =>
@@ -862,6 +928,30 @@ namespace Protostar.Registry.Api.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Search.SearchEntry", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Sessions.TranscriptChunk", null)
+                        .WithMany()
+                        .HasForeignKey("ChunkId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Protostar.Registry.Api.Memory.MemoryFile", null)
+                        .WithMany()
+                        .HasForeignKey("MemoryFileId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Protostar.Registry.Api.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Sessions.Transcript", null)
+                        .WithMany()
+                        .HasForeignKey("TranscriptId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Protostar.Registry.Api.Sessions.Machine", b =>

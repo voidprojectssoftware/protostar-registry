@@ -280,4 +280,52 @@ public sealed class MemoryFileTests
 
         Assert.Equal(new MemoryFileCurrent(2, true), file.Current());
     }
+
+    [Fact]
+    public void Recording_new_content_raises_memory_file_changed()
+    {
+        var file = NewFile();
+
+        file.Record(Laptop, Repo, Text("a"), Now);
+
+        Assert.Equal(new MemoryFileChanged(file.OwnerId, file.Id), Assert.Single(file.DomainEvents));
+    }
+
+    [Fact]
+    public void Recording_what_the_copy_already_holds_raises_nothing()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.ClearDomainEvents();
+
+        file.Record(Laptop, Repo, Text("a"), Now);
+
+        Assert.Empty(file.DomainEvents);
+    }
+
+    [Fact]
+    public void A_copy_moving_to_an_earlier_version_raises_memory_file_changed()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.Record(Laptop, Repo, Text("b"), Now);
+        file.ClearDomainEvents();
+
+        file.Record(Laptop, Repo, Text("a"), Now);
+
+        Assert.Single(file.DomainEvents.OfType<MemoryFileChanged>());
+    }
+
+    [Fact]
+    public void Marking_a_copy_deleted_raises_memory_file_changed_once()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.ClearDomainEvents();
+
+        file.MarkDeleted(Laptop, Repo, Now);
+        file.MarkDeleted(Laptop, Repo, Now);
+
+        Assert.Single(file.DomainEvents.OfType<MemoryFileChanged>());
+    }
 }
