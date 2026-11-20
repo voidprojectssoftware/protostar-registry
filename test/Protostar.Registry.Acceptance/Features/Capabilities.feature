@@ -13,21 +13,22 @@ Feature: The registry says which features it serves
     When a client asks the registry for its meta
     Then the meta lists API major 1
     And the meta lists exactly these capabilities, in this order
-      | capability           |
-      | skills               |
-      | stale-skill-push     |
-      | project-skills       |
-      | skill-rename         |
-      | skill-delete         |
-      | skill-tombstones     |
-      | sessions             |
-      | transcript-lookup    |
-      | redacted-read        |
-      | projects             |
-      | memory               |
-      | memory-content       |
-      | memory-base-versions |
-      | search               |
+      | capability               |
+      | skills                   |
+      | stale-skill-push         |
+      | project-skills           |
+      | skill-rename             |
+      | skill-delete             |
+      | skill-tombstones         |
+      | sessions                 |
+      | transcript-lookup        |
+      | transcript-prefix-lookup |
+      | redacted-read            |
+      | projects                 |
+      | memory                   |
+      | memory-content           |
+      | memory-base-versions     |
+      | search                   |
     And every capability the meta lists has a check of its feature
 
   Scenario Outline: The feature behind each listed capability works
@@ -37,18 +38,19 @@ Feature: The registry says which features it serves
     Then alice can use the feature behind "<capability>"
 
     Examples:
-      | capability           |
-      | skills               |
-      | stale-skill-push     |
-      | project-skills       |
-      | skill-rename         |
-      | skill-delete         |
-      | skill-tombstones     |
-      | sessions             |
-      | transcript-lookup    |
-      | redacted-read        |
-      | projects             |
-      | memory               |
-      | memory-content       |
-      | memory-base-versions |
-      | search               |
+      | capability               |
+      | skills                   |
+      | stale-skill-push         |
+      | project-skills           |
+      | skill-rename             |
+      | skill-delete             |
+      | skill-tombstones         |
+      | sessions                 |
+      | transcript-lookup        |
+      | transcript-prefix-lookup |
+      | redacted-read            |
+      | projects                 |
+      | memory                   |
+      | memory-content           |
+      | memory-base-versions     |
+      | search                   |

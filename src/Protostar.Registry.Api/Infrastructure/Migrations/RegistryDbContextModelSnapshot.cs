@@ -533,6 +533,12 @@ namespace Protostar.Registry.Api.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("FoldedKey")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasComputedColumnSql("lower(\"Key\")", true);
+
                     b.Property<string>("Harness")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -644,6 +650,10 @@ namespace Protostar.Registry.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ProjectId");
+
+                    b.HasIndex("OwnerId", "FoldedKey");
+
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("OwnerId", "FoldedKey"), new[] { null, "text_pattern_ops" });
 
                     b.HasIndex("OwnerId", "Kind");
 

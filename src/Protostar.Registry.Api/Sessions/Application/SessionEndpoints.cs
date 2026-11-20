@@ -57,6 +57,18 @@ public static class SessionEndpoints
     private const string UnknownMachineResponse =
         $"Invalid request. When the machine is not registered, the problem `type` is `{SessionProblemTypes.UnknownMachine}`; register it with `PUT /v1/machines/{{machineId}}` and retry.";
 
+    private const string ListDescription =
+        """
+        Lists sessions (or subagents) from every machine, most recently active first. Page with `before`, passing the
+        last item's `lastActivityAt`.
+
+        To find a session from the start of its id, pass `keyPrefix`: the result is every match, up to `limit`, so a
+        client that asks for one more than it will show can tell a unique prefix from an ambiguous one in one request.
+        """;
+
+    private static readonly string InvalidKeyPrefixTitle =
+        $"keyPrefix must be at least {TranscriptKeyPrefix.MinLength} of the characters a transcript key may hold: letters, digits, '.', '_' or '-'.";
+
     private const string UnknownTranscriptResponse =
         $"No transcript with that harness and key. The problem `type` is `{SessionProblemTypes.UnknownTranscript}`.";
 
@@ -134,9 +146,10 @@ public static class SessionEndpoints
             .WithTags(ApiTags.Transcripts)
             .WithName("ListTranscripts")
             .WithSummary("List my transcripts")
-            .WithDescription("Lists sessions (or subagents) from every machine, most recently active first. Page with `before`, passing the last item's `lastActivityAt`.")
+            .WithDescription(ListDescription)
             .Produces<TranscriptResponse[]>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
+            .WithResponseDescription(StatusCodes.Status400BadRequest, "`since` or `before` is not a time, or `keyPrefix` is too short or holds a character no key can.")
             .WithDateTimeQueryParameters("since", "before");
     }
 
@@ -249,16 +262,20 @@ public static class SessionEndpoints
         [Description("Only sessions in this project: its id, or text its name contains, for example `protostar`.")] string? project = null,
         [Description("Only transcripts active at or after this time, with any offset; one without an offset is UTC.")] string? since = null,
         [Description("Only transcripts last active before this time; pass the previous page's last `lastActivityAt`.")] string? before = null,
-        [Description("Page size, 1 to 200.")] int limit = 50)
+        [Description("Page size, 1 to 200.")] int limit = 50,
+        [Description("Only transcripts whose key starts with this, ignoring case: at least 4 characters. Ask for one more than you will show to know whether there are more.")] string? keyPrefix = null)
     {
         if (!TryGetOwner(user, out var ownerId))
             return Results.Unauthorized();
+        TranscriptKeyPrefix? prefix = null;
+        if (keyPrefix is not null && !TranscriptKeyPrefix.TryCreate(keyPrefix, out prefix))
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: InvalidKeyPrefixTitle);
         if (!QueryTimestamp.TryParseUtc(since, out var sinceUtc))
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: QueryTimestamp.InvalidTitle(nameof(since)));
         if (!QueryTimestamp.TryParseUtc(before, out var beforeUtc))
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: QueryTimestamp.InvalidTitle(nameof(before)));
 
-        var views = await service.ListAsync(ownerId, new TranscriptQuery(kind, harness, machine, project, sinceUtc, beforeUtc, limit), cancellationToken);
+        var views = await service.ListAsync(ownerId, new TranscriptQuery(kind, harness, machine, project, sinceUtc, beforeUtc, limit, prefix), cancellationToken);
         return Results.Ok(views.Select(TranscriptResponse.From).ToArray());
     }
 

@@ -37,6 +37,7 @@ public sealed class CapabilitySteps
             ["skill-tombstones"] = UseSkillTombstonesAsync,
             ["sessions"] = UseSessionsAsync,
             ["transcript-lookup"] = UseTranscriptLookupAsync,
+            ["transcript-prefix-lookup"] = UseTranscriptPrefixLookupAsync,
             ["redacted-read"] = UseRedactedReadAsync,
             ["projects"] = UseProjectsAsync,
             ["memory"] = UseMemoryAsync,
@@ -165,6 +166,15 @@ public sealed class CapabilitySteps
         Assert.Equal(2, answers.Count);
         Assert.True(answers[0]!["known"]!.GetValue<bool>());
         Assert.False(answers[1]!["known"]!.GetValue<bool>());
+    }
+
+    private static async Task UseTranscriptPrefixLookupAsync(RegistryUser user)
+    {
+        var key = await user.BackUpSessionAsync("hello");
+        await user.BackUpSessionAsync("another");
+        var found = (await user.GetJsonAsync($"/v1/transcripts?keyPrefix={key[..8].ToUpperInvariant()}&limit=11")).AsArray();
+        Assert.Equal(key, Assert.Single(found)!["key"]!.GetValue<string>());
+        await AssertStatusAsync(user.Http.GetAsync("/v1/transcripts?keyPrefix=abc"), HttpStatusCode.BadRequest);
     }
 
     private static async Task UseRedactedReadAsync(RegistryUser user)

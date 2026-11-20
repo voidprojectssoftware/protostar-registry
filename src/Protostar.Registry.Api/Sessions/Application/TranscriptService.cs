@@ -302,6 +302,8 @@ public sealed class TranscriptService
             transcripts = transcripts.Where(t => t.Summary.LastActivityAt >= since);
         if (query.Before is { } before)
             transcripts = transcripts.Where(t => t.Summary.LastActivityAt < before);
+        if (query.KeyPrefix is { } prefix)
+            transcripts = transcripts.Where(t => EF.Property<string>(t, TranscriptConfiguration.FoldedKey).StartsWith(prefix.Value));
 
         var page = await transcripts
             .OrderByDescending(t => t.Summary.LastActivityAt)
@@ -481,8 +483,17 @@ public sealed record RegisterTranscriptRequest(
     TranscriptKind Kind, string? ParentKey, Guid MachineId, string SourcePath, System.Text.Json.JsonElement? Metadata, ProjectFacts? Project = null);
 
 /// <summary>Filters for listing transcripts.</summary>
+/// <param name="Kind">Sessions or subagents.</param>
+/// <param name="Harness">Only this harness; <c>null</c> (or an invalid id) for any.</param>
+/// <param name="MachineId">Only transcripts from this machine; <c>null</c> for any.</param>
+/// <param name="Project">A project id, or text its name contains; <c>null</c> for any.</param>
+/// <param name="Since">Only transcripts last active at or after this time.</param>
+/// <param name="Before">Only transcripts last active before this time, for paging.</param>
+/// <param name="Limit">The most transcripts to return, clamped to 1 to 200.</param>
+/// <param name="KeyPrefix">Only transcripts whose key starts with this, ignoring case; <c>null</c> for any key.</param>
 public sealed record TranscriptQuery(
-    TranscriptKind Kind, string? Harness, Guid? MachineId, string? Project, DateTimeOffset? Since, DateTimeOffset? Before, int Limit);
+    TranscriptKind Kind, string? Harness, Guid? MachineId, string? Project, DateTimeOffset? Since, DateTimeOffset? Before, int Limit,
+    TranscriptKeyPrefix? KeyPrefix);
 
 /// <summary>A transcript joined with what listings show beside it.</summary>
 /// <param name="Transcript">The transcript.</param>
