@@ -152,14 +152,33 @@ public sealed class Skill : AggregateRoot
     /// version byte-for-byte; otherwise appends a version, advances <see cref="CurrentVersion"/>, and
     /// raises <see cref="SkillVersionPushed"/>.
     /// </summary>
+    /// <param name="pushedBy">The user pushing.</param>
+    /// <param name="manifest">The parsed SKILL.md.</param>
+    /// <param name="files">Every file of the new version.</param>
+    /// <param name="now">When it is pushed.</param>
+    /// <param name="baseVersion">
+    /// The version the pusher's copy was last synced from (0 when it never synced one), or <c>null</c> when the
+    /// pusher does not say, as clients from before this rule do.
+    /// </param>
+    /// <remarks>
+    /// A push that names a base must be based on the current version, or it would stack an edit made from an
+    /// older version on top of a newer one and hide the newer one in history. The unchanged check comes first:
+    /// content identical to the current version is never a conflict, whatever its base. A skill with no version
+    /// yet (a new skill, or one deleted and pushed again) accepts any base, since there is nothing to overwrite.
+    /// Two pushes racing from the same base both pass this check in memory; the unique (skill, version) index
+    /// then lets only one of them be saved.
+    /// </remarks>
     /// <exception cref="SkillCreatorViolationException">
     /// <paramref name="pushedBy"/> is not this skill's creator.
     /// </exception>
     /// <exception cref="SkillSizeExceededException">
     /// <paramref name="files"/> exceed the limits in <see cref="SkillSizePolicy"/>.
     /// </exception>
+    /// <exception cref="SkillVersionStaleException">
+    /// <paramref name="baseVersion"/> is given and is not the current version.
+    /// </exception>
     public SkillVersionPushOutcome PushVersion(
-        Guid pushedBy, SkillManifest manifest, IReadOnlyList<SkillFileContent> files, DateTimeOffset now)
+        Guid pushedBy, SkillManifest manifest, IReadOnlyList<SkillFileContent> files, DateTimeOffset now, int? baseVersion = null)
     {
         if (!SkillCreatorPolicy.CanChange(this, pushedBy))
             throw new SkillCreatorViolationException(Id, pushedBy);
@@ -170,6 +189,9 @@ public sealed class Skill : AggregateRoot
         var contentHash = Sha256Hash.OfFiles(files);
         if (CurrentVersion is { } current && current.ContentHash == contentHash)
             return SkillVersionPushOutcome.Unchanged(current);
+
+        if (baseVersion is { } based && CurrentVersion is { } latest && based != latest.VersionNumber)
+            throw new SkillVersionStaleException(based, latest.VersionNumber);
 
         // CurrentVersion is always the highest-numbered version, so next = current + 1 (or 1 when new).
         var versionNumber = (CurrentVersion?.VersionNumber ?? 0) + 1;

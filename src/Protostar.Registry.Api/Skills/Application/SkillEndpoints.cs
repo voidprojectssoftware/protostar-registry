@@ -1,4 +1,5 @@
 using Protostar.Registry.Api.Infrastructure;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using Protostar.Registry.Api.Projects;
@@ -56,13 +57,19 @@ public static class SkillEndpoints
                 "the skill is global. A skill is identified by creator, project and name, so a global skill and " +
                 "a project skill of the same name never share versions. The creator is the authenticated " +
                 "caller. Returns 201 when a new version is stored, or 200 when the push matches the current " +
-                "version byte-for-byte.")
+                "version byte-for-byte. An optional `baseVersion` field names the version the pushed copy was " +
+                "last synced from (0 when it never synced one). When it is given and is not the current version, " +
+                "and the content differs from the current version, nothing is stored and the answer is 409 with " +
+                $"problem `type` `{SkillProblemTypes.StaleVersion}` and the current version in `currentVersion`: " +
+                "the skill changed elsewhere since this copy was synced. A push without `baseVersion` is accepted " +
+                "on top of whatever is current, as before. A skill with no version yet accepts any base.")
             .WithMetadata(new RequestSizeLimitAttribute(SingleUploadMaxBytes))
             .Produces<SkillPushResponse>(StatusCodes.Status201Created)
             .Produces<SkillPushResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge);
 
         group.MapPost("/bulk", PushManyAsync)
@@ -72,7 +79,7 @@ public static class SkillEndpoints
                 "Uploads several skills at once as multipart/form-data. Each file part's filename is prefixed " +
                 "with its skill's directory segment (`<skill>/<relative path>`); files are grouped by that " +
                 "first segment, which also names the skill when its SKILL.md omits one. Every skill is pushed " +
-                "as a global skill. Returns one result per skill; one bad skill does not fail the others.")
+                "as a global skill, with no base version. Returns one result per skill; one bad skill does not fail the others.")
             .WithMetadata(new RequestSizeLimitAttribute(BulkUploadMaxBytes))
             .Produces<SkillBulkPushResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -223,12 +230,23 @@ public static class SkillEndpoints
         IFormFileCollection files,
         [FromForm] string? name,
         [FromForm] string? project,
+        [FromForm] string? baseVersion,
         ClaimsPrincipal user,
         SkillPushService pushService,
         CancellationToken cancellationToken)
     {
         if (!TryGetCreator(user, out var creatorId))
             return Results.Unauthorized();
+
+        // Bound as text and parsed here: a malformed number bound as int? fails inside the framework as an unhandled
+        // exception (an Error log for a client mistake) instead of this 400.
+        int? based = null;
+        if (Blank(baseVersion) is { } text)
+        {
+            if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "baseVersion must be 0 or a version number.");
+            based = number;
+        }
 
         ProjectFolderRequest? folder = null;
         if (Blank(project) is { } json && !TryReadProject(json, out folder))
@@ -238,7 +256,7 @@ public static class SkillEndpoints
         if (uploads.Count == 0)
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The upload contained no files.");
 
-        var result = await pushService.PushAsync(creatorId, folder, Blank(name), uploads, cancellationToken);
+        var result = await pushService.PushAsync(creatorId, folder, Blank(name), uploads, based, cancellationToken);
 
         return result.Status switch
         {
@@ -271,7 +289,7 @@ public static class SkillEndpoints
 
         var results = new List<SkillPushResult>(skills.Count);
         foreach (var (skillDirectory, skillFiles) in skills)
-            results.Add(await pushService.PushAsync(creatorId, null, skillDirectory, skillFiles, cancellationToken));
+            results.Add(await pushService.PushAsync(creatorId, null, skillDirectory, skillFiles, baseVersion: null, cancellationToken));
 
         return Results.Ok(new SkillBulkPushResponse(results.Select(ToResponse).ToArray()));
     }
@@ -338,6 +356,19 @@ public static class SkillEndpoints
 
     private static IResult Failure(SkillPushResult result)
     {
+        if (result.Error == SkillPushError.StaleVersion)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: result.Message,
+                type: SkillProblemTypes.StaleVersion,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["currentVersion"] = result.CurrentVersion,
+                    ["projectId"] = result.Project?.ProjectId,
+                });
+        }
+
         var status = result.Error switch
         {
             SkillPushError.UnknownCreator => StatusCodes.Status401Unauthorized,
@@ -361,6 +392,17 @@ public static class SkillEndpoints
         ProjectName: result.Project?.Name);
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+}
+
+/// <summary>Problem <c>type</c> URIs that identify a skills refusal independently of its title.</summary>
+/// <remarks>As <see cref="Sessions.SessionProblemTypes"/>: clients branch on these, never on the title. The URIs need not resolve.</remarks>
+public static class SkillProblemTypes
+{
+    /// <summary>
+    /// A push named a base version that is not the skill's current version (status <c>409</c>). The problem carries
+    /// <c>currentVersion</c>, and <c>projectId</c> for a project skill.
+    /// </summary>
+    public const string StaleVersion = "https://protostar.dev/problems/stale-skill-version";
 }
 
 /// <summary>The JSON shape returned for a single pushed skill (and each entry in a bulk push).</summary>
