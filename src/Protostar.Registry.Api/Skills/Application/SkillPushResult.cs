@@ -52,6 +52,13 @@ public enum SkillPushError
     /// <see cref="SkillPushResult.CurrentVersion"/> says which version is current.
     /// </summary>
     StaleVersion,
+
+    /// <summary>
+    /// The push came from a copy of a skill that was deleted or renamed in the registry since that copy synced
+    /// (<see cref="SkillTombstone.Refuses"/>). <see cref="SkillPushResult.LastVersion"/> is that skill's last version
+    /// under this name, and <see cref="SkillPushResult.RenamedTo"/> its name now when it was renamed.
+    /// </summary>
+    Removed,
 }
 
 /// <summary>
@@ -72,6 +79,12 @@ public sealed record SkillPushResult
 
     /// <summary>The skill's current version when a push was refused as <see cref="SkillPushError.StaleVersion"/>; <c>null</c> otherwise.</summary>
     public int? CurrentVersion { get; init; }
+
+    /// <summary>The removed skill's last version under this name, for <see cref="SkillPushError.Removed"/>; <c>null</c> otherwise.</summary>
+    public int? LastVersion { get; init; }
+
+    /// <summary>The removed skill's name now, for a <see cref="SkillPushError.Removed"/> rename; <c>null</c> otherwise.</summary>
+    public string? RenamedTo { get; init; }
 
     public SkillPushError Error { get; init; } = SkillPushError.None;
     public string? Message { get; init; }
@@ -108,6 +121,20 @@ public sealed record SkillPushResult
             Error = SkillPushError.StaleVersion,
             CurrentVersion = currentVersion,
             Message = message,
+            Project = project,
+        };
+
+    public static SkillPushResult Removed(SkillTombstone tombstone, int baseVersion, ProjectResolution? project = null) =>
+        new()
+        {
+            Status = SkillPushStatus.Failed,
+            Name = tombstone.Name,
+            Error = SkillPushError.Removed,
+            LastVersion = tombstone.LastVersion,
+            RenamedTo = tombstone.RenamedTo,
+            Message = tombstone.RenamedTo is { } renamedTo
+                ? $"This copy was based on version {baseVersion} of '{tombstone.Name}', which was renamed to '{renamedTo}' in the registry at version {tombstone.LastVersion}. Nothing was stored."
+                : $"This copy was based on version {baseVersion} of '{tombstone.Name}', which was deleted from the registry at version {tombstone.LastVersion}. Nothing was stored.",
             Project = project,
         };
 

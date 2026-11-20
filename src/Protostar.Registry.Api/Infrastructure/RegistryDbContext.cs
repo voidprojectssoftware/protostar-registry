@@ -8,7 +8,8 @@ namespace Protostar.Registry.Api.Infrastructure;
 
 /// <summary>
 /// The registry database and unit of work. Holds <see cref="User"/> and the <see cref="Skill"/> aggregate
-/// (<see cref="Skill"/>, <see cref="SkillVersion"/>, <see cref="SkillFile"/>), the sessions feature
+/// (<see cref="Skill"/>, <see cref="SkillVersion"/>, <see cref="SkillFile"/>) with the <see cref="SkillTombstone"/>s of
+/// removed skill names, the sessions feature
 /// (<see cref="Machine"/>, <see cref="Transcript"/>, <see cref="TranscriptChunk"/>; their bytes live in blob storage), the
 /// <see cref="Project"/> aggregate (<see cref="Project"/>, <see cref="ProjectKey"/>) plus OpenIddict's own tables
 /// (applications, authorizations, scopes, tokens), added to the model by the <c>UseOpenIddict()</c> call
@@ -26,6 +27,8 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
     public DbSet<SkillVersion> SkillVersions => Set<SkillVersion>();
 
     public DbSet<SkillFile> SkillFiles => Set<SkillFile>();
+
+    public DbSet<SkillTombstone> SkillTombstones => Set<SkillTombstone>();
 
     public DbSet<Machine> Machines => Set<Machine>();
 

@@ -607,6 +607,43 @@ namespace Protostar.Registry.Api.Migrations
                     b.ToTable("SkillFiles");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillTombstone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CreatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("LastVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("RemovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RenamedTo")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("CreatorId", "ProjectId", "Name")
+                        .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("CreatorId", "ProjectId", "Name"), false);
+
+                    b.ToTable("SkillTombstones");
+                });
+
             modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillVersion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -764,6 +801,20 @@ namespace Protostar.Registry.Api.Migrations
                         .HasForeignKey("SkillVersionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillTombstone", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("Protostar.Registry.Api.Skills.SkillVersion", b =>

@@ -9,13 +9,18 @@ namespace Protostar.Registry.Api.Skills;
 /// <remarks>
 /// Content is never set from outside; callers push a new version through <see cref="PushVersion"/>, which
 /// keeps the invariants (creator-only writes, contiguous version numbers, current = newest, idempotent
-/// re-push) inside the aggregate. A skill is identified by (creator, project, name), where no project means
+/// re-push) inside the aggregate. Versions start at 1, or after the last version of a removed skill whose name this
+/// one reuses (<see cref="SkillTombstone"/>). A skill is identified by (creator, project, name), where no project means
 /// a global skill (ADR 0002), so a global <c>deploy</c> and each project's <c>deploy</c> are separate skills
 /// with separate histories.
 /// </remarks>
 public sealed class Skill : AggregateRoot
 {
     private readonly List<SkillVersion> _versions = [];
+
+    // The version number the first push takes. Above 1 only for a new skill that reuses a removed skill's name; once a
+    // version exists, numbering follows the current version, so this is never persisted.
+    private int _firstVersionNumber = 1;
 
     private Skill()
     {
@@ -75,9 +80,17 @@ public sealed class Skill : AggregateRoot
     /// <param name="name">The skill's name.</param>
     /// <param name="now">When it is created.</param>
     /// <param name="projectId">The project it belongs to; <c>null</c> for a global skill.</param>
-    /// <exception cref="ArgumentException"><paramref name="name"/> fails <see cref="IsValidName"/>.</exception>
-    public static Skill Create(Guid creatorId, string name, DateTimeOffset now, Guid? projectId = null)
+    /// <param name="replacing">
+    /// The tombstone of a removed skill whose name (in the same scope) this one takes; its versions are numbered after
+    /// that skill's last version, so no copy of the removed skill can be mistaken for a copy of this one.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> fails <see cref="IsValidName"/>, or <paramref name="replacing"/> is another name's or scope's tombstone.
+    /// </exception>
+    public static Skill Create(Guid creatorId, string name, DateTimeOffset now, Guid? projectId = null, SkillTombstone? replacing = null)
     {
+        if (replacing is not null && (replacing.CreatorId != creatorId || replacing.ProjectId != projectId || replacing.Name != name))
+            throw new ArgumentException("A skill only replaces the tombstone of its own name and scope.", nameof(replacing));
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("A skill must have a name.", nameof(name));
         if (!IsValidName(name))
@@ -90,6 +103,7 @@ public sealed class Skill : AggregateRoot
             ProjectId = projectId,
             Name = name,
             CreatedAt = now,
+            _firstVersionNumber = (replacing?.LastVersion ?? 0) + 1,
         };
     }
 
@@ -193,8 +207,8 @@ public sealed class Skill : AggregateRoot
         if (baseVersion is { } based && CurrentVersion is { } latest && based != latest.VersionNumber)
             throw new SkillVersionStaleException(based, latest.VersionNumber);
 
-        // CurrentVersion is always the highest-numbered version, so next = current + 1 (or 1 when new).
-        var versionNumber = (CurrentVersion?.VersionNumber ?? 0) + 1;
+        // CurrentVersion is always the highest-numbered version, so next = current + 1 (or the first number when new).
+        var versionNumber = CurrentVersion is { } previous ? previous.VersionNumber + 1 : _firstVersionNumber;
         var version = SkillVersion.Create(Id, versionNumber, manifest, files, contentHash, pushedBy, now);
 
         _versions.Add(version);
