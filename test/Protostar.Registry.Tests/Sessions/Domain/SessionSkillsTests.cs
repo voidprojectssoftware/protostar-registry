@@ -1,0 +1,140 @@
+using System.Text;
+using Protostar.Registry.Api.Sessions;
+using Protostar.Registry.Api.Skills;
+using Xunit;
+
+namespace Protostar.Registry.Tests.Sessions.Domain;
+
+/// <summary>Contract tests for <see cref="SessionSkills.Match"/>: which registry skill and version a used name was.</summary>
+public sealed class SessionSkillsTests
+{
+    private static readonly Guid Owner = Guid.NewGuid();
+    private static readonly Guid Project = Guid.NewGuid();
+    private static readonly DateTimeOffset Monday = new(2026, 11, 16, 9, 0, 0, TimeSpan.Zero);
+
+    private static Skill SkillWithVersionsAt(string name, Guid? projectId, params DateTimeOffset[] pushedAt)
+    {
+        var skill = Skill.Create(Owner, name, pushedAt.FirstOrDefault(Monday), projectId);
+        foreach (var at in pushedAt)
+        {
+            var file = SkillFileContent.Create(RelativePath.FromTrusted("SKILL.md"), Encoding.UTF8.GetBytes($"# {name} at {at:O}"));
+            skill.PushVersion(Owner, SkillManifest.Empty, [file], at);
+        }
+        return skill;
+    }
+
+    private static SessionSkill MatchOne(SkillUse use, Guid? projectId, Skill[] skills, SkillTombstone[]? tombstones = null) =>
+        Assert.Single(SessionSkills.Match([use], projectId, skills, tombstones ?? []));
+
+    [Fact]
+    public void The_version_is_the_newest_pushed_at_or_before_the_last_use()
+    {
+        var deploy = SkillWithVersionsAt("deploy", null, Monday, Monday.AddHours(2), Monday.AddHours(4));
+
+        var used = MatchOne(new SkillUse("deploy", 2, Monday.AddHours(1), Monday.AddHours(2)), null, [deploy]);
+
+        Assert.Equal(deploy.Id, used.SkillId);
+        Assert.Equal(2, used.Version);
+        Assert.False(used.Deleted);
+    }
+
+    [Fact]
+    public void A_skill_first_pushed_after_the_session_matches_with_no_version()
+    {
+        var deploy = SkillWithVersionsAt("deploy", null, Monday.AddDays(1));
+
+        var used = MatchOne(SkillUse.Once("deploy", Monday), null, [deploy]);
+
+        Assert.Equal(deploy.Id, used.SkillId);
+        Assert.Null(used.Version);
+    }
+
+    [Fact]
+    public void A_use_with_no_timestamp_matches_with_no_version()
+    {
+        var deploy = SkillWithVersionsAt("deploy", null, Monday);
+
+        Assert.Null(MatchOne(SkillUse.Once("deploy", null), null, [deploy]).Version);
+    }
+
+    [Fact]
+    public void A_plugin_skill_matches_nothing_even_when_a_skill_has_its_short_name()
+    {
+        var brainstorm = SkillWithVersionsAt("brainstorm", null, Monday);
+
+        var used = MatchOne(SkillUse.Once("superpowers:brainstorm", Monday.AddHours(1)), null, [brainstorm]);
+
+        Assert.Null(used.SkillId);
+        Assert.False(used.Deleted);
+    }
+
+    [Fact]
+    public void A_project_skill_wins_over_a_personal_skill_of_the_same_name()
+    {
+        var personal = SkillWithVersionsAt("deploy", null, Monday);
+        var inProject = SkillWithVersionsAt("deploy", Project, Monday);
+
+        Assert.Equal(inProject.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal, inProject]).SkillId);
+    }
+
+    [Fact]
+    public void A_personal_skill_matches_when_the_project_has_none_of_that_name()
+    {
+        var personal = SkillWithVersionsAt("deploy", null, Monday);
+
+        Assert.Equal(personal.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal]).SkillId);
+    }
+
+    [Fact]
+    public void Another_projects_skill_never_matches()
+    {
+        var elsewhere = SkillWithVersionsAt("deploy", Guid.NewGuid(), Monday);
+
+        Assert.Null(MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [elsewhere]).SkillId);
+    }
+
+    [Fact]
+    public void A_deleted_skill_is_marked_deleted_with_no_skill_or_version()
+    {
+        var gone = SkillWithVersionsAt("deploy", null, Monday);
+        var tombstone = SkillTombstone.Deleted(gone, 1, Monday.AddDays(1));
+
+        var used = MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), null, [], [tombstone]);
+
+        Assert.True(used.Deleted);
+        Assert.Null(used.SkillId);
+        Assert.Null(used.Version);
+    }
+
+    [Fact]
+    public void A_skill_renamed_since_matches_under_its_new_name_with_its_versions()
+    {
+        var skill = SkillWithVersionsAt("deploy", null, Monday);
+        skill.Rename(Owner, "ship", ["deploy"]);
+        var tombstone = SkillTombstone.Renamed(skill, "deploy", 1, Monday.AddDays(1));
+
+        var used = MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), null, [skill], [tombstone]);
+
+        Assert.Equal(skill.Id, used.SkillId);
+        Assert.Equal(1, used.Version);
+        Assert.Equal("deploy", used.Name);
+    }
+
+    [Fact]
+    public void A_deleted_project_skill_is_reported_deleted_rather_than_falling_back_to_a_personal_skill()
+    {
+        var personal = SkillWithVersionsAt("deploy", null, Monday);
+        var tombstone = SkillTombstone.Deleted(SkillWithVersionsAt("deploy", Project, Monday), 1, Monday.AddDays(1));
+
+        Assert.True(MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal], [tombstone]).Deleted);
+    }
+
+    [Fact]
+    public void Results_are_earliest_first_used_first()
+    {
+        var matched = SessionSkills.Match(
+            [SkillUse.Once("late", Monday.AddHours(2)), SkillUse.Once("untimed", null), SkillUse.Once("early", Monday)], null, [], []);
+
+        Assert.Equal(["early", "late", "untimed"], matched.Select(m => m.Name));
+    }
+}
