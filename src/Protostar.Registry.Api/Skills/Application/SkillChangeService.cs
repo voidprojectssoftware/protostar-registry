@@ -48,7 +48,7 @@ public sealed class SkillChangeService
 
         try
         {
-            await _db.SaveChangesAsync(cancellationToken);
+            await _db.SaveChangesRacingAsync(cancellationToken);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {

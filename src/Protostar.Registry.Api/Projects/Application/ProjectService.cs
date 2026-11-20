@@ -208,7 +208,7 @@ public sealed class ProjectService
 
         try
         {
-            await _db.SaveChangesAndDispatchAsync(_events, cancellationToken);
+            await _db.SaveChangesRacingAndDispatchAsync(_events, cancellationToken);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {

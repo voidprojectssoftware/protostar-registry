@@ -19,6 +19,46 @@ public sealed class ProjectTests
     }
 
     [Fact]
+    public void Keys_attached_by_different_projects_have_their_ids_in_the_same_order()
+    {
+        // EF inserts a table's new rows in id order, so this is what keeps two concurrent attaches from deadlocking.
+        const string root = "0123456789abcdef0123456789abcdef01234567";
+        const string remote = "github.com/acme/widget";
+        int? order = null;
+        for (var i = 0; i < 50; i++)
+        {
+            var project = Project.Create(Guid.NewGuid(), "w", Now);
+            if (i % 2 == 0)
+            {
+                project.Attach(ProjectKeyKind.RootCommit, root, Now);
+                project.Attach(ProjectKeyKind.Remote, remote, Now);
+            }
+            else
+            {
+                project.Attach(ProjectKeyKind.Remote, remote, Now);
+                project.Attach(ProjectKeyKind.RootCommit, root, Now);
+            }
+
+            var rootId = project.Keys.Single(k => k.Kind == ProjectKeyKind.RootCommit).Id;
+            var remoteId = project.Keys.Single(k => k.Kind == ProjectKeyKind.Remote).Id;
+            order ??= Math.Sign(rootId.CompareTo(remoteId));
+            Assert.Equal(order, Math.Sign(rootId.CompareTo(remoteId)));
+        }
+    }
+
+    [Fact]
+    public void A_key_attached_again_gets_a_new_id()
+    {
+        var project = Project.Create(Guid.NewGuid(), "w", Now);
+        project.Link("m:/w", Now);
+        var first = project.Keys.Single().Id;
+        project.Unlink("m:/w", Now);
+        project.Link("m:/w", Now);
+
+        Assert.NotEqual(first, project.Keys.Single().Id);
+    }
+
+    [Fact]
     public void Attaching_a_remote_raises_an_event_so_shallow_clones_can_be_refiled()
     {
         var project = Project.Create(Guid.NewGuid(), "w", Now);
