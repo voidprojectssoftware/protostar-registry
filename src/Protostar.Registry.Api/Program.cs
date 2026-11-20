@@ -19,10 +19,11 @@ builder.AddServiceDefaults();
 
 // Postgres + EF Core. Aspire injects the "registrydb" connection string. UseOpenIddict() adds
 // OpenIddict's tables (applications, authorizations, scopes, tokens) to the same context.
-// LogHandledRacesAtDebug keeps insert races the services recover from out of the Error log.
+// LogHandledFailuresAtDebug keeps failures EF and the services recover from (insert races, the migrations
+// history probe on an empty database) out of the Error log.
 builder.AddNpgsqlDbContext<RegistryDbContext>(
     "registrydb",
-    configureDbContextOptions: options => options.UseOpenIddict().LogHandledRacesAtDebug());
+    configureDbContextOptions: options => options.UseOpenIddict().LogHandledFailuresAtDebug());
 
 // Token signing and encryption keys. Loaded before anything else is built so a production host without them
 // stops here with a message naming the settings, instead of failing on the first token request.

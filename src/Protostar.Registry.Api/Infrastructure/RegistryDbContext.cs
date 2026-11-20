@@ -57,7 +57,7 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
 
     /// <summary>Saves the unit of work for a caller that handles a unique violation as a lost insert race.</summary>
     /// <remarks>
-    /// <see cref="HandledRaceLogging"/> logs that save's unique violation at Debug instead of Error, because the
+    /// <see cref="HandledFailureLogging"/> logs that save's unique violation at Debug instead of Error, because the
     /// caller recovers from it. Any other failure of the save, and a unique violation in any other save, still
     /// logs at Error. Use it only around a save whose unique violation the caller catches.
     /// </remarks>

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Protostar.Registry.Acceptance.Support;
 
@@ -32,6 +33,9 @@ public sealed class RegistryFactory : WebApplicationFactory<Program>
         _bucket = bucket;
     }
 
+    /// <summary>What the registry has logged at Warning and above since it started.</summary>
+    public CapturedLogs Logs { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         var certificates = RegistryInfrastructure.Certificates;
@@ -49,6 +53,8 @@ public sealed class RegistryFactory : WebApplicationFactory<Program>
         builder.UseSetting("Logging:LogLevel:Default", "Warning");
         // TestServer has no request body size feature, so every upload would warn that its limit was not applied.
         builder.UseSetting("Logging:LogLevel:Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware", "Error");
+
+        builder.ConfigureLogging(logging => logging.AddProvider(Logs));
 
         builder.ConfigureTestServices(services =>
         {

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Protostar.Registry.Acceptance.Support;
 using Protostar.Registry.Api.Infrastructure;
 using Reqnroll;
@@ -33,6 +34,13 @@ public sealed class MigrationSteps
         var shipped = db.Database.GetMigrations().ToList();
         Assert.NotEmpty(shipped);
         Assert.Equal(shipped, await db.Database.GetAppliedMigrationsAsync());
+    }
+
+    [Then("the registry logged no errors while starting")]
+    public void ThenTheRegistryLoggedNoErrorsWhileStarting()
+    {
+        var errors = _scenario.Factory.Logs.Entries.Where(entry => entry.Level >= LogLevel.Error).ToList();
+        Assert.True(errors.Count == 0, "The first start logged errors:\n" + string.Join("\n", errors));
     }
 
     [Then("the model has no changes that lack a migration")]
