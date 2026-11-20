@@ -20,7 +20,8 @@ public static class MemoryEndpoints
 
         Send only what changed. A file whose content the registry already holds as one of its versions stores
         nothing new (`unchanged`); new content becomes the next version, and earlier versions are kept. A path
-        under `deleted` is marked deleted on this machine's copy; the file and its versions stay.
+        under `deleted` is marked deleted on this machine's copy; the file and its versions stay. A file may carry
+        `baseVersion`, the version this machine last synced and edited; a new version keeps it as its base.
 
         At most {{MemoryLimits.MaxFilesPerPush}} files per push, sent and deleted together, each at most
         {{MemoryFileSizePolicy.MaxBytes / 1024}} KiB (problem `type` `{{MemoryProblemTypes.FileTooLarge}}`, status 413).
@@ -36,7 +37,10 @@ public static class MemoryEndpoints
         The current version is the one the most recently changed copy that still has the file holds, so a note one
         machine reverted is served as reverted. `deletedOn` lists the copies that deleted the file; `deletedEverywhere`
         is set when no copy still has it, and then the content is what the last copy held. A client bringing memory to
-        a new machine decides what a deletion means for it; the registry never drops the file.
+        a new machine decides what a deletion means for it; the registry never drops the file. `machineId` and
+        `machineName` name the machine that first sent the version served, so a client can say where a version it
+        did not take came from. `history` lists every version of the file with `base`, the version its sender had
+        last synced, so a client can tell a version that builds on the one it has from a parallel edit.
 
         A `404` with problem `type` `{{MemoryProblemTypes.UnknownProject}}` means the project is not yours or does not
         exist; `{{MemoryProblemTypes.UnknownFile}}` means it has no such file or version.
@@ -160,7 +164,7 @@ public sealed record MemoryPushResponse(Guid ProjectId, string ProjectName, stri
 
 /// <summary>One file's outcome.</summary>
 /// <param name="Path">The file's path.</param>
-/// <param name="Change">`created`, `versioned`, `unchanged`, `markedDeleted`, or `unknown` (a deletion of a file this copy never backed up).</param>
+/// <param name="Change">`created`, `versioned`, `unchanged`, `markedDeleted`, or `unknown` (a deletion of a path the registry has no file for).</param>
 /// <param name="Version">The version this machine's copy now points at; absent for `unknown`.</param>
 public sealed record MemoryFileOutcomeResponse(string Path, MemoryFileChange Change, int? Version);
 

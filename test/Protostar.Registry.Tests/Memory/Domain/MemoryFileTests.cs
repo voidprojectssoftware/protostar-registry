@@ -52,6 +52,40 @@ public sealed class MemoryFileTests
     }
 
     [Fact]
+    public void A_new_version_keeps_the_version_its_sender_edited_from_as_its_base()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+
+        file.Record(Desktop, Repo, Text("b"), Now, baseVersion: 1);
+        file.Record(Laptop, Repo, Text("c"), Now);
+
+        Assert.Equal([null, 1, null], file.Versions.OrderBy(v => v.Number).Select(v => v.BaseNumber));
+    }
+
+    [Fact]
+    public void A_base_that_names_no_version_of_the_file_is_not_kept()
+    {
+        var file = NewFile();
+
+        file.Record(Laptop, Repo, Text("a"), Now, baseVersion: 7);
+
+        Assert.Null(Assert.Single(file.Versions).BaseNumber);
+    }
+
+    [Fact]
+    public void Content_already_stored_keeps_its_first_base_whatever_a_later_sender_says()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.Record(Laptop, Repo, Text("b"), Now, baseVersion: 1);
+
+        file.Record(Desktop, Repo, Text("b"), Now, baseVersion: 2);
+
+        Assert.Equal(1, file.Versions.Single(v => v.Number == 2).BaseNumber);
+    }
+
+    [Fact]
     public void Content_equal_to_an_older_version_points_at_it_instead_of_storing_it_again()
     {
         var file = NewFile();
@@ -117,15 +151,31 @@ public sealed class MemoryFileTests
     }
 
     [Fact]
-    public void Marking_deleted_on_a_copy_that_never_sent_the_file_is_unknown()
+    public void Marking_deleted_on_a_copy_that_never_sent_the_file_records_a_deleted_copy_at_the_current_version()
+    {
+        var file = NewFile();
+        file.Record(Laptop, Repo, Text("a"), Now);
+        file.Record(Laptop, Repo, Text("b"), Now);
+
+        var recorded = file.MarkDeleted(Desktop, Repo, Now.AddDays(1));
+
+        Assert.Equal(new MemoryFileRecorded(MemoryFileChange.MarkedDeleted, 2), recorded);
+        var copy = file.Copies.Single(c => c.MachineId == Desktop);
+        Assert.Equal((2, Now.AddDays(1)), (copy.VersionNumber, copy.DeletedAt));
+        Assert.Null(file.Copies.Single(c => c.MachineId == Laptop).DeletedAt);
+        Assert.Equal(new MemoryFileCurrent(2, false), file.Current());
+    }
+
+    [Fact]
+    public void A_file_deleted_on_the_machine_that_sent_it_and_on_one_that_only_pulled_it_is_deleted_everywhere()
     {
         var file = NewFile();
         file.Record(Laptop, Repo, Text("a"), Now);
 
-        var recorded = file.MarkDeleted(Desktop, Repo, Now);
+        file.MarkDeleted(Laptop, Repo, Now.AddDays(1));
+        file.MarkDeleted(Desktop, Repo, Now.AddDays(2));
 
-        Assert.Equal(new MemoryFileRecorded(MemoryFileChange.Unknown, null), recorded);
-        Assert.Null(file.Copies.Single().DeletedAt);
+        Assert.True(file.Current().DeletedEverywhere);
     }
 
     [Fact]

@@ -332,6 +332,9 @@ namespace Protostar.Registry.Api.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("BaseNumber")
+                        .HasColumnType("integer");
+
                     b.Property<byte[]>("Content")
                         .IsRequired()
                         .HasColumnType("bytea");

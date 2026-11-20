@@ -59,13 +59,18 @@ public sealed class MemoryFile : AggregateRoot
     };
 
     /// <summary>Records <paramref name="content"/> as what the copy in <paramref name="folder"/> on <paramref name="machineId"/> holds now.</summary>
+    /// <param name="baseVersion">
+    /// The version the sending machine last synced for this file, which its content was edited from; <c>null</c> when
+    /// it had none (a file new there). Kept on a new version as <see cref="MemoryFileVersion.BaseNumber"/>; ignored
+    /// when it names no version of this file.
+    /// </param>
     /// <returns>What changed, and the version the copy now points at.</returns>
     /// <exception cref="MemoryFileTooLargeException">The content is over <see cref="MemoryFileSizePolicy.MaxBytes"/>.</exception>
     /// <remarks>
     /// Content equal to any earlier version, from any machine, points the copy at that version instead of adding one.
     /// A copy that was marked deleted and is sent again is present again.
     /// </remarks>
-    public MemoryFileRecorded Record(Guid machineId, string folder, byte[] content, DateTimeOffset now)
+    public MemoryFileRecorded Record(Guid machineId, string folder, byte[] content, DateTimeOffset now, int? baseVersion = null)
     {
         MemoryFileSizePolicy.Check(Path, content.LongLength);
 
@@ -75,7 +80,8 @@ public sealed class MemoryFile : AggregateRoot
         if (version is null)
         {
             change = _versions.Count == 0 ? MemoryFileChange.Created : MemoryFileChange.Versioned;
-            version = MemoryFileVersion.Create(Id, _versions.Count == 0 ? 1 : _versions.Max(v => v.Number) + 1, content, hash, machineId, now);
+            var knownBase = _versions.Any(v => v.Number == baseVersion) ? baseVersion : null;
+            version = MemoryFileVersion.Create(Id, _versions.Count == 0 ? 1 : _versions.Max(v => v.Number) + 1, content, hash, machineId, knownBase, now);
             _versions.Add(version);
             UpdatedAt = now;
         }
@@ -95,15 +101,21 @@ public sealed class MemoryFile : AggregateRoot
     }
 
     /// <summary>Marks the file deleted in <paramref name="folder"/> on <paramref name="machineId"/>, keeping it and its versions.</summary>
-    /// <returns>
-    /// <see cref="MemoryFileChange.MarkedDeleted"/>, <see cref="MemoryFileChange.Unchanged"/> when it already was, or
-    /// <see cref="MemoryFileChange.Unknown"/> when that copy never backed the file up.
-    /// </returns>
+    /// <returns><see cref="MemoryFileChange.MarkedDeleted"/>, or <see cref="MemoryFileChange.Unchanged"/> when it already was.</returns>
+    /// <remarks>
+    /// A checkout that never sent the file got it from another machine (a pull) and deleted it. It gets a copy, at
+    /// the current version and marked deleted, so the other machines are told where it was deleted and a file
+    /// deleted on every machine that had it is <see cref="MemoryFileCurrent.DeletedEverywhere"/> (protostar-cli#47).
+    /// </remarks>
     public MemoryFileRecorded MarkDeleted(Guid machineId, string folder, DateTimeOffset now)
     {
         var copy = CopyOn(machineId, folder);
         if (copy is null)
-            return new MemoryFileRecorded(MemoryFileChange.Unknown, null);
+        {
+            copy = MemoryFileCopy.Create(Id, machineId, folder, Current().Version, now);
+            _copies.Add(copy);
+        }
+
         if (!copy.MarkDeleted(now))
             return new MemoryFileRecorded(MemoryFileChange.Unchanged, copy.VersionNumber);
 
@@ -164,9 +176,17 @@ public sealed class MemoryFileVersion
     /// <summary>The machine that first sent this content.</summary>
     public Guid MachineId { get; private set; }
 
+    /// <summary>The version this content was edited from, as the sending machine last synced it; <c>null</c> when unknown or none.</summary>
+    /// <remarks>
+    /// Lets a machine pulling the file tell a version that builds on what it has (its base is among this version's
+    /// ancestors) from one made in parallel on another machine (protostar-cli#47). The number alone cannot: a
+    /// machine that never saw version 1 still sends version 2.
+    /// </remarks>
+    public int? BaseNumber { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
 
-    internal static MemoryFileVersion Create(Guid memoryFileId, int number, byte[] content, Sha256Hash hash, Guid machineId, DateTimeOffset now) => new()
+    internal static MemoryFileVersion Create(Guid memoryFileId, int number, byte[] content, Sha256Hash hash, Guid machineId, int? baseNumber, DateTimeOffset now) => new()
     {
         Id = Guid.NewGuid(),
         MemoryFileId = memoryFileId,
@@ -175,6 +195,7 @@ public sealed class MemoryFileVersion
         Size = content.LongLength,
         Sha256 = hash,
         MachineId = machineId,
+        BaseNumber = baseNumber,
         CreatedAt = now,
     };
 }
@@ -255,7 +276,7 @@ public enum MemoryFileChange
     /// <summary>The file was marked deleted on the sending checkout; it and its versions are kept.</summary>
     MarkedDeleted,
 
-    /// <summary>A deletion for a file the sending checkout never backed up; nothing to mark.</summary>
+    /// <summary>A deletion of a path the registry has no file for; nothing to mark.</summary>
     Unknown,
 }
 
