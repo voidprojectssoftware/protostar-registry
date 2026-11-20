@@ -55,7 +55,11 @@ public sealed class ProjectService
 
             try
             {
-                await _db.SaveChangesAsync(cancellationToken);
+                // The last attempt's violation is not handled, so only the earlier ones are saved as racing.
+                if (attempt < 3)
+                    await _db.SaveChangesRacingAsync(cancellationToken);
+                else
+                    await _db.SaveChangesAsync(cancellationToken);
                 return new ProjectResolution(project.Id, project.Name, match.RecognisedBy);
             }
             catch (DbUpdateException ex) when (attempt < 3 && ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })

@@ -20,9 +20,11 @@ public sealed class MachineTests
     }
 
     [Fact]
-    public void A_registration_without_an_id_is_refused()
+    public void A_registration_under_the_all_zeros_id_is_refused()
     {
-        Assert.Throws<ArgumentException>(() => Machine.Register(Guid.Empty, Guid.NewGuid(), "box", "linux", Now));
+        var refusal = Assert.Throws<MachineIdMissingException>(() => Machine.Register(Guid.Empty, Guid.NewGuid(), "box", "linux", Now));
+
+        Assert.Contains("all zeros", refusal.Message);
     }
 
     [Fact]

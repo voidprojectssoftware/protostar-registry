@@ -60,7 +60,9 @@ public static class SessionEndpoints
             .Produces<MachineResponse>(StatusCodes.Status201Created)
             .Produces<MachineResponse>()
             .WithResponseDescription(StatusCodes.Status201Created, "The machine was registered.")
-            .WithResponseDescription(StatusCodes.Status200OK, "The machine was already registered; its details were updated.");
+            .WithResponseDescription(StatusCodes.Status200OK, "The machine was already registered; its details were updated.")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .WithResponseDescription(StatusCodes.Status400BadRequest, "The id is all zeros. Generate a random id once and keep it.");
         machines.MapGet("", ListMachinesAsync)
             .WithName("ListMachines")
             .WithSummary("List my machines")
@@ -131,7 +133,11 @@ public static class SessionEndpoints
         if (!TryGetOwner(user, out var ownerId))
             return Results.Unauthorized();
 
-        var (machine, created) = await service.RegisterMachineAsync(ownerId, machineId, request.Name, request.OperatingSystem, cancellationToken);
+        var result = await service.RegisterMachineAsync(ownerId, machineId, request.Name, request.OperatingSystem, cancellationToken);
+        if (result.Failure != TranscriptFailure.None)
+            return Failure(result);
+
+        var (machine, created) = result.Value;
         var response = MachineResponse.From(machine);
         return created ? Results.Created($"/v1/machines/{machine.Id}", response) : Results.Ok(response);
     }

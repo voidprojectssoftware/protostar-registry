@@ -31,40 +31,50 @@ public sealed class TranscriptService
 
     /// <summary>Registers <paramref name="machineId"/>, or refreshes its details. Returns the machine and whether it was new.</summary>
     /// <remarks>
-    /// Safe to call concurrently for the same new id: one caller inserts the machine, and every caller that
-    /// loses the insert race refreshes the row the winner inserted instead, so all of them succeed with that one row.
+    /// Safe to call concurrently for the same new id: exactly one caller's insert lands, and every other caller
+    /// refreshes the row that insert created, so all of them succeed with that one row. The all-zeros id is
+    /// refused as invalid.
     /// </remarks>
-    public async Task<(Machine Machine, bool Created)> RegisterMachineAsync(
+    public async Task<TranscriptResult<(Machine Machine, bool Created)>> RegisterMachineAsync(
         Guid ownerId, Guid machineId, string name, string operatingSystem, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var machine = await FindMachineAsync(ownerId, machineId, cancellationToken);
-        if (machine is not null)
+        if (machine is null)
         {
-            machine.Update(name, operatingSystem, now);
-            await _db.SaveChangesAsync(cancellationToken);
-            return (machine, false);
+            Machine registered;
+            try
+            {
+                registered = Machine.Register(machineId, ownerId, name, operatingSystem, now);
+            }
+            catch (MachineIdMissingException ex)
+            {
+                return TranscriptResult<(Machine, bool)>.Invalid(ex.Message);
+            }
+
+            if (await InsertIfAbsentAsync(registered, cancellationToken))
+                return TranscriptResult<(Machine, bool)>.Ok((registered, true));
+
+            // Another request registered this id between our read and our insert: refresh its row instead.
+            machine = (await FindMachineAsync(ownerId, machineId, cancellationToken))!;
         }
 
-        machine = Machine.Register(machineId, ownerId, name, operatingSystem, now);
-        _db.Machines.Add(machine);
-        try
-        {
-            await _db.SaveChangesAsync(cancellationToken);
-            return (machine, true);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        {
-            // The new machine is the only change in this save, so a duplicate key means another request
-            // registered this id between our read and our insert: treat it as the update it now is. Any other
-            // database error is not caught.
-            _db.ChangeTracker.Clear();
-            var existing = await FindMachineAsync(ownerId, machineId, cancellationToken);
-            existing!.Update(name, operatingSystem, now);
-            await _db.SaveChangesAsync(cancellationToken);
-            return (existing, false);
-        }
+        machine.Update(name, operatingSystem, now);
+        await _db.SaveChangesAsync(cancellationToken);
+        return TranscriptResult<(Machine, bool)>.Ok((machine, false));
     }
+
+    // Inserts the machine unless its (owner, id) row already exists; true when this call inserted it. ON CONFLICT
+    // makes the lost race a no-op instead of a unique violation that EF would log as an error. The column list
+    // repeats MachineConfiguration's mapping; a mismatch fails every first registration, not silently.
+    private async Task<bool> InsertIfAbsentAsync(Machine machine, CancellationToken cancellationToken) =>
+        await _db.Database.ExecuteSqlAsync(
+            $"""
+            INSERT INTO "Machines" ("OwnerId", "Id", "Name", "OperatingSystem", "RegisteredAt", "LastSeenAt")
+            VALUES ({machine.OwnerId}, {machine.Id}, {machine.Name}, {machine.OperatingSystem}, {machine.RegisteredAt}, {machine.LastSeenAt})
+            ON CONFLICT ("OwnerId", "Id") DO NOTHING
+            """,
+            cancellationToken) == 1;
 
     /// <summary>Registers a transcript, or refreshes where it lives, and files it under its project. Returns its current position.</summary>
     /// <remarks>
@@ -177,7 +187,7 @@ public sealed class TranscriptService
 
         try
         {
-            await _db.SaveChangesAsync(cancellationToken);
+            await _db.SaveChangesRacingAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException || ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {

@@ -33,10 +33,11 @@ public sealed class Machine
     public DateTimeOffset LastSeenAt { get; private set; }
 
     /// <summary>Registers a new machine.</summary>
+    /// <exception cref="MachineIdMissingException"><paramref name="id"/> is all zeros, which no client generates on purpose.</exception>
     public static Machine Register(Guid id, Guid ownerId, string name, string operatingSystem, DateTimeOffset now)
     {
         if (id == Guid.Empty)
-            throw new ArgumentException("A machine needs an id.", nameof(id));
+            throw new MachineIdMissingException();
 
         var machine = new Machine { Id = id, OwnerId = ownerId, RegisteredAt = now };
         machine.Update(name, operatingSystem, now);
