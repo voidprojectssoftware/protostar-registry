@@ -11,7 +11,7 @@
   "capabilities": ["skills", "stale-skill-push", "project-skills", "skill-rename", "skill-delete", "skill-tombstones",
                    "sessions", "transcript-lookup", "transcript-prefix-lookup", "session-skills", "redacted-read",
                    "projects", "memory", "memory-content", "memory-base-versions", "search",
-                   "memory-redacted-read", "agents"]
+                   "memory-redacted-read", "agents", "agent-content", "session-agents", "agent-search"]
 }
 ```
 
@@ -54,8 +54,10 @@ be added or dropped unnoticed, and cannot stay listed after its feature is gone.
 | `memory-base-versions` | A pushed memory file may carry `baseVersion`, which is kept as the new version's base. Content downloads carry each file's `history` of versions and bases, and `deletedOn`, the copies that deleted it. |
 | `search` | `GET /v1/search` searches the caller's sessions and memory, with secrets redacted. |
 | `memory-redacted-read` | `GET /v1/memory/{projectId}/content` takes `redacted=true` and returns each file's content with known secrets replaced by markers such as `[redacted:github-token]`; `sha256` and `size` then describe the redacted bytes. |
-
 | `agents` | Custom agents (ADR 0003). `POST /v1/agents` pushes one agent file (one multipart file part named by its path in the agents folder) with `baseVersion` and `project` as for skills; a stale push is refused with `409` and problem type `stale-agent-version`, and a push from a copy of a removed agent with `agent-deleted` or `agent-renamed`. `GET /v1/agents` lists them (with `includeProjects`, `projectId`, `removed` and `firstVersion`); `POST /v1/agents/{name}/rename` and `DELETE /v1/agents/{name}` rename and delete. Project agents follow a folder when it is linked or unlinked, named in `movedAgents`. |
+| `agent-content` | `GET /v1/agents/{name}/content` returns one version of an agent: `name`, `projectId`, `version`, `description`, `path`, `contentHash`, `pushedAt`, `redacted`, `size` and the file as base64 `content`. `projectId` and `version` select as for skills (omitted: the personal agent, the current version). `redacted=true` returns the file with known secrets replaced by markers, and `size` describes the redacted bytes; `contentHash` is always the stored file's. An agent or version the caller does not have is `404` with problem type `unknown-agent`. |
+| `session-agents` | `GET /v1/transcripts/{harness}/{key}/agents` lists the caller's custom agents the transcript delegated to (Agent or Task tool calls by `subagent_type`; a session's list includes its subagents'), each with `name`, `uses`, `firstUsedAt`, `lastUsedAt`, `agentId`, `projectId` and, when a version had been pushed by two minutes after the session ended (the CLI backs agents up at `SessionEnd`), the inferred `version` with `versionInferred: true`. Names match the session's project first, then personal agents, as Claude Code loads them. Built-in and plugin agent types are never listed. `deleted: true` marks an agent since deleted. |
+| `agent-search` | `GET /v1/search` takes `kind=agent` and searches the caller's custom agents (each one's current file, redacted); a hit has `name`, `version`, `description`, `projectId`, `date` and `snippet`. Without `kind`, search still covers sessions and memory only. |
 
 ## Adding a capability
 

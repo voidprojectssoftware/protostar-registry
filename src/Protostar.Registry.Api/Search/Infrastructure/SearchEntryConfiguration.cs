@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using NpgsqlTypes;
+using Protostar.Registry.Api.Agents;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Memory;
 using Protostar.Registry.Api.Sessions;
@@ -29,6 +30,7 @@ public sealed class SearchEntryConfiguration : IEntityTypeConfiguration<SearchEn
         builder.HasIndex(e => e.OwnerId);
         builder.HasIndex(e => new { e.ChunkId, e.Segment }).IsUnique();
         builder.HasIndex(e => new { e.MemoryFileId, e.Segment }).IsUnique();
+        builder.HasIndex(e => new { e.AgentId, e.Segment }).IsUnique();
         builder.HasIndex(e => e.TranscriptId);
 
         // Entries go with what they were made from.
@@ -36,5 +38,6 @@ public sealed class SearchEntryConfiguration : IEntityTypeConfiguration<SearchEn
         builder.HasOne<Transcript>().WithMany().HasForeignKey(e => e.TranscriptId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<TranscriptChunk>().WithMany().HasForeignKey(e => e.ChunkId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<MemoryFile>().WithMany().HasForeignKey(e => e.MemoryFileId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Agent>().WithMany().HasForeignKey(e => e.AgentId).OnDelete(DeleteBehavior.Cascade);
     }
 }

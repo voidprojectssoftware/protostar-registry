@@ -47,6 +47,9 @@ public sealed class CapabilitySteps
             ["search"] = UseSearchAsync,
             ["memory-redacted-read"] = UseMemoryRedactedReadAsync,
             ["agents"] = UseAgentsAsync,
+            ["agent-content"] = UseAgentContentAsync,
+            ["session-agents"] = UseSessionAgentsAsync,
+            ["agent-search"] = UseAgentSearchAsync,
         };
     }
 
@@ -283,6 +286,37 @@ public sealed class CapabilitySteps
         Assert.Equal(["probe", "renamed"], removed);
         var refused = await AssertStatusAsync(user.PushAgentAsync("renamed", baseVersion: 2), HttpStatusCode.Conflict);
         Assert.Equal("https://protostar.dev/problems/agent-deleted", refused["type"]!.GetValue<string>());
+    }
+
+    private static async Task UseAgentContentAsync(RegistryUser user)
+    {
+        await AssertStatusAsync(user.PushAgentAsync("probe", markdown: $"---\nname: probe\ndescription: Probes.\n---\nUse {GitHubToken}.\n"), HttpStatusCode.Created);
+        var stored = await user.GetJsonAsync("/v1/agents/probe/content");
+        Assert.Contains(GitHubToken, Encoding.UTF8.GetString(Convert.FromBase64String(stored["content"]!.GetValue<string>())));
+        var redacted = await user.GetJsonAsync("/v1/agents/probe/content?redacted=true&version=1");
+        var text = Encoding.UTF8.GetString(Convert.FromBase64String(redacted["content"]!.GetValue<string>()));
+        Assert.Contains("[redacted:github-token]", text);
+        Assert.DoesNotContain(GitHubToken, text);
+    }
+
+    private static async Task UseSessionAgentsAsync(RegistryUser user)
+    {
+        await AssertStatusAsync(user.PushAgentAsync("probe"), HttpStatusCode.Created);
+        var usedAt = DateTimeOffset.UtcNow;
+        var key = await user.BackUpSessionAsync(k => RegistryUser.Jsonl(
+            RegistryUser.AgentCallLine(k, "probe", usedAt), RegistryUser.AgentCallLine(k, "Explore", usedAt)));
+        var used = Assert.Single((await user.GetJsonAsync($"/v1/transcripts/{RegistryUser.Harness}/{key}/agents"))["agents"]!.AsArray())!;
+        Assert.Equal("probe", used["name"]!.GetValue<string>());
+        Assert.Equal(1, used["version"]!.GetValue<int>());
+        Assert.True(used["versionInferred"]!.GetValue<bool>());
+    }
+
+    private static async Task UseAgentSearchAsync(RegistryUser user)
+    {
+        await AssertStatusAsync(user.PushAgentAsync("probe", markdown: "---\nname: probe\ndescription: Probes.\n---\nReview the flamingo migrations.\n"), HttpStatusCode.Created);
+        var hit = Assert.Single((await user.GetJsonAsync("/v1/search?q=flamingo&kind=agent")).AsArray())!;
+        Assert.Equal("agent", hit["kind"]!.GetValue<string>());
+        Assert.Equal("probe", hit["name"]!.GetValue<string>());
     }
 
     private static async Task<JsonObject> AssertStatusAsync(Task<HttpResponseMessage> request, HttpStatusCode expected)

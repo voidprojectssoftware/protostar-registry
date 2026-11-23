@@ -163,6 +163,27 @@ public sealed class RegistryUser
         },
     };
 
+    /// <summary>A Claude Code assistant line in which the model delegated to the agent type <paramref name="agentType"/> at <paramref name="at"/>.</summary>
+    /// <param name="tool"><c>Agent</c>, or <c>Task</c> as older Claude Code versions name it.</param>
+    /// <remarks>The <c>prompt</c> is there so a scenario can check it is never kept.</remarks>
+    public static JsonObject AgentCallLine(string key, string agentType, DateTimeOffset at, string prompt = "", string tool = "Agent") => new()
+    {
+        ["type"] = "assistant",
+        ["sessionId"] = key,
+        ["timestamp"] = at.ToString("O"),
+        ["message"] = new JsonObject
+        {
+            ["role"] = "assistant",
+            ["content"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "tool_use",
+                ["id"] = "toolu_" + Guid.NewGuid().ToString("N"),
+                ["name"] = tool,
+                ["input"] = new JsonObject { ["subagent_type"] = agentType, ["description"] = "Delegate", ["prompt"] = prompt },
+            }),
+        },
+    };
+
     /// <summary>The JSONL of <paramref name="lines"/>, one per line.</summary>
     public static byte[] Jsonl(params JsonObject[] lines) =>
         Encoding.UTF8.GetBytes(string.Concat(lines.Select(line => line.ToJsonString() + "\n")));

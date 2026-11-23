@@ -11,7 +11,7 @@ public sealed class ClaudeCodeSkillParsingTests
     private static readonly DateTimeOffset T1 = DateTimeOffset.Parse("2026-11-09T22:00:00Z");
     private static readonly DateTimeOffset T2 = DateTimeOffset.Parse("2026-11-09T23:00:00Z");
 
-    private static IReadOnlyList<SkillUse> Skills(params string[] lines) =>
+    private static IReadOnlyList<NamedUse> Skills(params string[] lines) =>
         Parser.Parse(Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => l + "\n")))).Skills;
 
     private static string SkillCall(string skill, DateTimeOffset at, string args = "") =>
@@ -31,7 +31,7 @@ public sealed class ClaudeCodeSkillParsingTests
     {
         var use = Assert.Single(Skills(SkillCall("deploy", T1)));
 
-        Assert.Equal(new SkillUse("deploy", 1, T1, T1), use);
+        Assert.Equal(new NamedUse("deploy", 1, T1, T1), use);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class ClaudeCodeSkillParsingTests
     {
         var uses = Skills(SkillCall("deploy", T2), SkillCall("review", T1), SkillCall("deploy", T1));
 
-        Assert.Equal([new SkillUse("deploy", 2, T1, T2), new SkillUse("review", 1, T1, T1)], uses);
+        Assert.Equal([new NamedUse("deploy", 2, T1, T2), new NamedUse("review", 1, T1, T1)], uses);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public sealed class ClaudeCodeSkillParsingTests
     {
         var use = Assert.Single(Skills(Command("review", T1), SkillContent("review")));
 
-        Assert.Equal(new SkillUse("review", 1, T1, T1), use);
+        Assert.Equal(new NamedUse("review", 1, T1, T1), use);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class ClaudeCodeSkillParsingTests
     [Fact]
     public void A_name_no_harness_writes_is_skipped()
     {
-        Assert.Empty(Skills(SkillCall("", T1), SkillCall("two words", T1), SkillCall(new string('x', SkillUse.MaxNameLength + 1), T1)));
+        Assert.Empty(Skills(SkillCall("", T1), SkillCall("two words", T1), SkillCall(new string('x', NamedUse.MaxNameLength + 1), T1)));
     }
 
     [Fact]
@@ -130,11 +130,11 @@ public sealed class ClaudeCodeSkillParsingTests
     {
         var untimed = """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"deploy"}}]}}""";
 
-        Assert.Equal(new SkillUse("deploy", 1, null, null), Assert.Single(Skills(untimed)));
+        Assert.Equal(new NamedUse("deploy", 1, null, null), Assert.Single(Skills(untimed)));
     }
 }
 
-/// <summary>Contract tests for <see cref="SkillUse.Merge"/> and how a summary folds skills in.</summary>
+/// <summary>Contract tests for <see cref="NamedUse.Merge"/> and how a summary folds skills in.</summary>
 public sealed class SkillUseTests
 {
     private static readonly DateTimeOffset T1 = DateTimeOffset.Parse("2026-11-09T22:00:00Z");
@@ -143,38 +143,38 @@ public sealed class SkillUseTests
     [Fact]
     public void Merging_adds_counts_per_name_and_widens_times_keeping_first_seen_order()
     {
-        var merged = SkillUse.Merge(
-            [new SkillUse("a", 1, T2, T2), new SkillUse("b", 1, T1, T1)],
-            [new SkillUse("c", 1, T1, T1), new SkillUse("a", 2, T1, T1)]);
+        var merged = NamedUse.Merge(
+            [new NamedUse("a", 1, T2, T2), new NamedUse("b", 1, T1, T1)],
+            [new NamedUse("c", 1, T1, T1), new NamedUse("a", 2, T1, T1)]);
 
-        Assert.Equal([new SkillUse("a", 3, T1, T2), new SkillUse("b", 1, T1, T1), new SkillUse("c", 1, T1, T1)], merged);
+        Assert.Equal([new NamedUse("a", 3, T1, T2), new NamedUse("b", 1, T1, T1), new NamedUse("c", 1, T1, T1)], merged);
     }
 
     [Fact]
     public void Names_compare_exactly()
     {
-        Assert.Equal(2, SkillUse.Merge([SkillUse.Once("Deploy", T1)], [SkillUse.Once("deploy", T1)]).Count);
+        Assert.Equal(2, NamedUse.Merge([NamedUse.Once("Deploy", T1)], [NamedUse.Once("deploy", T1)]).Count);
     }
 
     [Fact]
     public void Merging_keeps_at_most_the_distinct_limit_and_goes_on_counting_kept_names()
     {
-        var full = Enumerable.Range(0, SkillUse.MaxDistinct).Select(i => SkillUse.Once($"s{i}", T1)).ToList();
+        var full = Enumerable.Range(0, NamedUse.MaxDistinct).Select(i => NamedUse.Once($"s{i}", T1)).ToList();
 
-        var merged = SkillUse.Merge(full, [SkillUse.Once("one-too-many", T1), SkillUse.Once("s0", T2)]);
+        var merged = NamedUse.Merge(full, [NamedUse.Once("one-too-many", T1), NamedUse.Once("s0", T2)]);
 
-        Assert.Equal(SkillUse.MaxDistinct, merged.Count);
+        Assert.Equal(NamedUse.MaxDistinct, merged.Count);
         Assert.DoesNotContain(merged, u => u.Name == "one-too-many");
-        Assert.Equal(new SkillUse("s0", 2, T1, T2), merged[0]);
+        Assert.Equal(new NamedUse("s0", 2, T1, T2), merged[0]);
     }
 
     [Fact]
     public void A_summary_folds_each_chunks_skills_in()
     {
         var summary = TranscriptSummary.Empty
-            .Add(new TranscriptFacts { Skills = [SkillUse.Once("deploy", T1)] })
-            .Add(new TranscriptFacts { Skills = [SkillUse.Once("deploy", T2), SkillUse.Once("review", T2)] });
+            .Add(new TranscriptFacts { Skills = [NamedUse.Once("deploy", T1)] })
+            .Add(new TranscriptFacts { Skills = [NamedUse.Once("deploy", T2), NamedUse.Once("review", T2)] });
 
-        Assert.Equal([new SkillUse("deploy", 2, T1, T2), SkillUse.Once("review", T2)], summary.Skills);
+        Assert.Equal([new NamedUse("deploy", 2, T1, T2), NamedUse.Once("review", T2)], summary.Skills);
     }
 }

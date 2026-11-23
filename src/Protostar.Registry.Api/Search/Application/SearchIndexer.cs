@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Protostar.Registry.Api.Agents;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Memory;
@@ -7,7 +8,7 @@ using Protostar.Registry.Api.Sessions;
 
 namespace Protostar.Registry.Api.Search;
 
-/// <summary>Writes the search index entries of one transcript chunk or one memory file, replacing any it had.</summary>
+/// <summary>Writes the search index entries of one transcript chunk, memory file or custom agent, replacing any it had.</summary>
 /// <remarks>
 /// Used by the event handlers as content arrives, and by the reprocessing pass (<see cref="TranscriptReprocessor"/> and
 /// <see cref="SearchBackfill"/>) for content that arrived before the index existed or was indexed by an older
@@ -61,6 +62,22 @@ public sealed class SearchIndexer
         var entries = SearchEntry.ForMemoryFile(file.OwnerId, file.Id, file.UpdatedAt, version.MachineId, text, DateTimeOffset.UtcNow);
 
         await _db.SearchEntries.Where(e => e.MemoryFileId == file.Id).ExecuteDeleteAsync(cancellationToken);
+        await SaveAsync(entries, cancellationToken);
+    }
+
+    /// <summary>Indexes an agent's current version, its whole file (front matter included), replacing its earlier entries.</summary>
+    /// <remarks>Does nothing for an agent that no longer exists. A deleted agent's entries go with it (the foreign key cascades).</remarks>
+    public async Task IndexAgentAsync(Guid agentId, CancellationToken cancellationToken)
+    {
+        var current = await _db.Agents.AsNoTracking()
+            .Where(a => a.Id == agentId && a.CurrentVersion != null)
+            .Select(a => new { a.CreatorId, VersionId = a.CurrentVersion!.Id, a.CurrentVersion.Content })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (current is null)
+            return;
+
+        var entries = SearchEntry.ForAgent(current.CreatorId, agentId, current.VersionId, Encoding.UTF8.GetString(current.Content), DateTimeOffset.UtcNow);
+        await _db.SearchEntries.Where(e => e.AgentId == agentId).ExecuteDeleteAsync(cancellationToken);
         await SaveAsync(entries, cancellationToken);
     }
 
@@ -134,6 +151,32 @@ public sealed class IndexChangedMemoryFile : IDomainEventHandler<MemoryFileChang
         catch (Exception ex) when (ex is DbUpdateException or Npgsql.NpgsqlException)
         {
             _logger.LogWarning(ex, "Could not index memory file {MemoryFileId}; the search backfill will retry it", domainEvent.MemoryFileId);
+        }
+    }
+}
+
+/// <summary>Re-indexes a custom agent whenever a new version of it is pushed.</summary>
+/// <remarks>As <see cref="IndexAppendedChunk"/>: a failure is logged and left for <see cref="SearchBackfill"/>, which finds stale agents.</remarks>
+public sealed class IndexPushedAgent : IDomainEventHandler<AgentVersionPushed>
+{
+    private readonly SearchIndexer _indexer;
+    private readonly ILogger<IndexPushedAgent> _logger;
+
+    public IndexPushedAgent(SearchIndexer indexer, ILogger<IndexPushedAgent> logger)
+    {
+        _indexer = indexer;
+        _logger = logger;
+    }
+
+    public async Task HandleAsync(AgentVersionPushed domainEvent, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _indexer.IndexAgentAsync(domainEvent.AgentId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is DbUpdateException or Npgsql.NpgsqlException)
+        {
+            _logger.LogWarning(ex, "Could not index agent {AgentId}; the search backfill will retry it", domainEvent.AgentId);
         }
     }
 }

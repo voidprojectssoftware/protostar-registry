@@ -85,6 +85,22 @@ public static class SessionEndpoints
         Only names, counts and times are kept, never the arguments a skill was invoked with.
         """;
 
+    private const string AgentsDescription =
+        """
+        Lists the custom agents the transcript delegated to (Agent or Task tool calls, by `subagent_type`), earliest
+        first used first. A session's list includes what its subagents delegated to.
+
+        Only your own agents are listed: a name is matched to your agents in the registry, the session's project first,
+        then your personal agents, as Claude Code loads them (the reverse of skills). Built-in agent types
+        (`general-purpose`, `Explore`, `Plan`, ...) and plugin agents (`plugin:agent`) match nothing and are left out.
+        `projectId` is the project of the agent matched, absent for a personal agent.
+        A transcript records only the name, so `version` is inferred: the newest version pushed no later than two
+        minutes after the session ended (`versionInferred` is then `true`). The CLI backs agents up when a session ends,
+        and Claude Code loads them when it starts, so the end, not the use, is when the version used reaches the
+        registry. With no version pushed by then, `version` is absent. An agent since deleted is reported with
+        `deleted: true`. Only names, counts and times are kept, never the prompt an agent was given.
+        """;
+
     private const string UnknownTranscriptResponse =
         $"No transcript with that harness and key. The problem `type` is `{SessionProblemTypes.UnknownTranscript}`.";
 
@@ -154,6 +170,14 @@ public static class SessionEndpoints
             .WithSummary("List the skills a session used")
             .WithDescription(SkillsDescription)
             .Produces<TranscriptSkillsResponse>()
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
+
+        transcripts.MapGet("/agents", GetAgentsAsync)
+            .WithName("GetTranscriptAgents")
+            .WithSummary("List the custom agents a session used")
+            .WithDescription(AgentsDescription)
+            .Produces<TranscriptAgentsResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound)
             .WithResponseDescription(StatusCodes.Status404NotFound, UnknownTranscriptResponse);
 
@@ -282,6 +306,22 @@ public static class SessionEndpoints
 
         var (transcript, skills) = result.Value;
         return Results.Ok(TranscriptSkillsResponse.From(transcript, skills));
+    }
+
+    private static async Task<IResult> GetAgentsAsync(
+        [Description("The harness that wrote the transcript.")] string harness,
+        [Description("The transcript's key.")] string key,
+        ClaimsPrincipal user, TranscriptService service, CancellationToken cancellationToken)
+    {
+        if (!TryGetOwner(user, out var ownerId))
+            return Results.Unauthorized();
+
+        var result = await service.GetAgentsAsync(ownerId, harness, key, cancellationToken);
+        if (result.Failure != TranscriptFailure.None)
+            return Failure(result);
+
+        var (transcript, agents) = result.Value;
+        return Results.Ok(TranscriptAgentsResponse.From(transcript, agents));
     }
 
     private static async Task<IResult> LookupAsync(
@@ -482,4 +522,32 @@ public sealed record TranscriptSkillResponse(
 {
     internal static TranscriptSkillResponse From(SessionSkill s) =>
         new(s.Name, s.Uses, s.FirstUsedAt, s.LastUsedAt, s.SkillId, s.Version, s.Version is not null, s.Deleted);
+}
+
+/// <summary>The custom agents a transcript used.</summary>
+/// <param name="Harness">The harness that wrote it.</param>
+/// <param name="Key">Its key.</param>
+/// <param name="Agents">Each of the caller's agents it (and, for a session, its subagents) delegated to, earliest first used first.</param>
+public sealed record TranscriptAgentsResponse(string Harness, string Key, IReadOnlyList<TranscriptAgentResponse> Agents)
+{
+    internal static TranscriptAgentsResponse From(Transcript transcript, IReadOnlyList<SessionAgent> agents) =>
+        new(transcript.Harness.Value, transcript.Key.Value, agents.Select(TranscriptAgentResponse.From).ToList());
+}
+
+/// <summary>One custom agent a transcript delegated to, and the registry agent and version it was.</summary>
+/// <param name="Name">The agent type as the session named it.</param>
+/// <param name="Uses">How many times it was delegated to.</param>
+/// <param name="FirstUsedAt">The first delegation's time; absent when none was recorded.</param>
+/// <param name="LastUsedAt">The last delegation's time; absent when none was recorded.</param>
+/// <param name="AgentId">The registry agent it matched; absent when it was deleted.</param>
+/// <param name="ProjectId">That agent's project; absent for a personal agent.</param>
+/// <param name="Version">The version inferred to have been used; absent when none had been pushed by the end of the session.</param>
+/// <param name="VersionInferred">True when <paramref name="Version"/> is present: it is inferred from push times, never read from the transcript.</param>
+/// <param name="Deleted">True when the agent has since been deleted from the registry.</param>
+public sealed record TranscriptAgentResponse(
+    string Name, int Uses, DateTimeOffset? FirstUsedAt, DateTimeOffset? LastUsedAt, Guid? AgentId, Guid? ProjectId, int? Version,
+    bool VersionInferred, bool Deleted)
+{
+    internal static TranscriptAgentResponse From(SessionAgent a) =>
+        new(a.Name, a.Uses, a.FirstUsedAt, a.LastUsedAt, a.AgentId, a.ProjectId, a.Version, a.Version is not null, a.Deleted);
 }

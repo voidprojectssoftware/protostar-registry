@@ -60,7 +60,7 @@ public static class SessionSkills
     /// <param name="skills">The owner's skills that may match, with their versions loaded.</param>
     /// <param name="tombstones">The owner's removed skill names that may match.</param>
     public static IReadOnlyList<SessionSkill> Match(
-        IReadOnlyList<SkillUse> uses, Guid? projectId, IReadOnlyList<Skill> skills, IReadOnlyList<SkillTombstone> tombstones)
+        IReadOnlyList<NamedUse> uses, Guid? projectId, IReadOnlyList<Skill> skills, IReadOnlyList<SkillTombstone> tombstones)
     {
         Guid?[] scopes = projectId is { } project ? [null, project] : [null];
         return uses
@@ -73,7 +73,7 @@ public static class SessionSkills
     /// <summary>True when <paramref name="name"/> is a plugin's skill, which no registry skill can be.</summary>
     public static bool IsPluginSkill(string name) => name.Contains(':');
 
-    private static SessionSkill Match(SkillUse use, Guid?[] scopes, IReadOnlyList<Skill> skills, IReadOnlyList<SkillTombstone> tombstones)
+    private static SessionSkill Match(NamedUse use, Guid?[] scopes, IReadOnlyList<Skill> skills, IReadOnlyList<SkillTombstone> tombstones)
     {
         var unmatched = new SessionSkill(use.Name, use.Uses, use.FirstUsedAt, use.LastUsedAt, null, null, false);
         if (IsPluginSkill(use.Name))

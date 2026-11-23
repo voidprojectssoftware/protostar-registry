@@ -32,6 +32,9 @@ Feature: The registry says which features it serves
       | search                   |
       | memory-redacted-read     |
       | agents                   |
+      | agent-content            |
+      | session-agents           |
+      | agent-search             |
     And every capability the meta lists has a check of its feature
 
   Scenario Outline: The feature behind each listed capability works
@@ -60,3 +63,6 @@ Feature: The registry says which features it serves
       | search                   |
       | memory-redacted-read     |
       | agents                   |
+      | agent-content            |
+      | session-agents           |
+      | agent-search             |

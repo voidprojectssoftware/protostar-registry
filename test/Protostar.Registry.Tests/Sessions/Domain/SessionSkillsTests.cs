@@ -23,7 +23,7 @@ public sealed class SessionSkillsTests
         return skill;
     }
 
-    private static SessionSkill MatchOne(SkillUse use, Guid? projectId, Skill[] skills, SkillTombstone[]? tombstones = null) =>
+    private static SessionSkill MatchOne(NamedUse use, Guid? projectId, Skill[] skills, SkillTombstone[]? tombstones = null) =>
         Assert.Single(SessionSkills.Match([use], projectId, skills, tombstones ?? []));
 
     [Fact]
@@ -31,7 +31,7 @@ public sealed class SessionSkillsTests
     {
         var deploy = SkillWithVersionsAt("deploy", null, Monday, Monday.AddHours(2), Monday.AddHours(4));
 
-        var used = MatchOne(new SkillUse("deploy", 2, Monday.AddHours(1), Monday.AddHours(2)), null, [deploy]);
+        var used = MatchOne(new NamedUse("deploy", 2, Monday.AddHours(1), Monday.AddHours(2)), null, [deploy]);
 
         Assert.Equal(deploy.Id, used.SkillId);
         Assert.Equal(2, used.Version);
@@ -45,7 +45,7 @@ public sealed class SessionSkillsTests
         var use = Monday.AddHours(3);
         var deploy = SkillWithVersionsAt("deploy", null, Monday, use.AddSeconds(2));
 
-        Assert.Equal(2, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+        Assert.Equal(2, MatchOne(NamedUse.Once("deploy", use), null, [deploy]).Version);
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public sealed class SessionSkillsTests
         var use = Monday.AddHours(3);
         var deploy = SkillWithVersionsAt("deploy", null, use.AddSeconds(2));
 
-        Assert.Equal(1, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+        Assert.Equal(1, MatchOne(NamedUse.Once("deploy", use), null, [deploy]).Version);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public sealed class SessionSkillsTests
         var use = Monday.AddHours(3);
         var deploy = SkillWithVersionsAt("deploy", null, Monday, use + SessionSkills.PushGrace);
 
-        Assert.Equal(2, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+        Assert.Equal(2, MatchOne(NamedUse.Once("deploy", use), null, [deploy]).Version);
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public sealed class SessionSkillsTests
         var use = Monday.AddHours(3);
         var deploy = SkillWithVersionsAt("deploy", null, Monday, use + SessionSkills.PushGrace + TimeSpan.FromSeconds(1));
 
-        Assert.Equal(1, MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+        Assert.Equal(1, MatchOne(NamedUse.Once("deploy", use), null, [deploy]).Version);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class SessionSkillsTests
         var use = Monday.AddHours(3);
         var deploy = SkillWithVersionsAt("deploy", null, use + SessionSkills.PushGrace + TimeSpan.FromSeconds(1));
 
-        Assert.Null(MatchOne(SkillUse.Once("deploy", use), null, [deploy]).Version);
+        Assert.Null(MatchOne(NamedUse.Once("deploy", use), null, [deploy]).Version);
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public sealed class SessionSkillsTests
     {
         var deploy = SkillWithVersionsAt("deploy", null, Monday.AddDays(1));
 
-        var used = MatchOne(SkillUse.Once("deploy", Monday), null, [deploy]);
+        var used = MatchOne(NamedUse.Once("deploy", Monday), null, [deploy]);
 
         Assert.Equal(deploy.Id, used.SkillId);
         Assert.Null(used.Version);
@@ -100,7 +100,7 @@ public sealed class SessionSkillsTests
     {
         var deploy = SkillWithVersionsAt("deploy", null, Monday);
 
-        Assert.Null(MatchOne(SkillUse.Once("deploy", null), null, [deploy]).Version);
+        Assert.Null(MatchOne(NamedUse.Once("deploy", null), null, [deploy]).Version);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class SessionSkillsTests
     {
         var brainstorm = SkillWithVersionsAt("brainstorm", null, Monday);
 
-        var used = MatchOne(SkillUse.Once("superpowers:brainstorm", Monday.AddHours(1)), null, [brainstorm]);
+        var used = MatchOne(NamedUse.Once("superpowers:brainstorm", Monday.AddHours(1)), null, [brainstorm]);
 
         Assert.Null(used.SkillId);
         Assert.False(used.Deleted);
@@ -120,7 +120,7 @@ public sealed class SessionSkillsTests
         var personal = SkillWithVersionsAt("deploy", null, Monday);
         var inProject = SkillWithVersionsAt("deploy", Project, Monday);
 
-        Assert.Equal(personal.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [personal, inProject]).SkillId);
+        Assert.Equal(personal.Id, MatchOne(NamedUse.Once("deploy", Monday.AddHours(1)), Project, [personal, inProject]).SkillId);
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public sealed class SessionSkillsTests
     {
         var inProject = SkillWithVersionsAt("deploy", Project, Monday);
 
-        Assert.Equal(inProject.Id, MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [inProject]).SkillId);
+        Assert.Equal(inProject.Id, MatchOne(NamedUse.Once("deploy", Monday.AddHours(1)), Project, [inProject]).SkillId);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class SessionSkillsTests
     {
         var elsewhere = SkillWithVersionsAt("deploy", Guid.NewGuid(), Monday);
 
-        Assert.Null(MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [elsewhere]).SkillId);
+        Assert.Null(MatchOne(NamedUse.Once("deploy", Monday.AddHours(1)), Project, [elsewhere]).SkillId);
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class SessionSkillsTests
         var gone = SkillWithVersionsAt("deploy", null, Monday);
         var tombstone = SkillTombstone.Deleted(gone, 1, Monday.AddDays(1));
 
-        var used = MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), null, [], [tombstone]);
+        var used = MatchOne(NamedUse.Once("deploy", Monday.AddHours(1)), null, [], [tombstone]);
 
         Assert.True(used.Deleted);
         Assert.Null(used.SkillId);
@@ -159,7 +159,7 @@ public sealed class SessionSkillsTests
         skill.Rename(Owner, "ship", ["deploy"]);
         var tombstone = SkillTombstone.Renamed(skill, "deploy", 1, Monday.AddDays(1));
 
-        var used = MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), null, [skill], [tombstone]);
+        var used = MatchOne(NamedUse.Once("deploy", Monday.AddHours(1)), null, [skill], [tombstone]);
 
         Assert.Equal(skill.Id, used.SkillId);
         Assert.Equal(1, used.Version);
@@ -172,14 +172,14 @@ public sealed class SessionSkillsTests
         var inProject = SkillWithVersionsAt("deploy", Project, Monday);
         var tombstone = SkillTombstone.Deleted(SkillWithVersionsAt("deploy", null, Monday), 1, Monday.AddDays(1));
 
-        Assert.True(MatchOne(SkillUse.Once("deploy", Monday.AddHours(1)), Project, [inProject], [tombstone]).Deleted);
+        Assert.True(MatchOne(NamedUse.Once("deploy", Monday.AddHours(1)), Project, [inProject], [tombstone]).Deleted);
     }
 
     [Fact]
     public void Results_are_earliest_first_used_first()
     {
         var matched = SessionSkills.Match(
-            [SkillUse.Once("late", Monday.AddHours(2)), SkillUse.Once("untimed", null), SkillUse.Once("early", Monday)], null, [], []);
+            [NamedUse.Once("late", Monday.AddHours(2)), NamedUse.Once("untimed", null), NamedUse.Once("early", Monday)], null, [], []);
 
         Assert.Equal(["early", "late", "untimed"], matched.Select(m => m.Name));
     }
