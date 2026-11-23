@@ -15,6 +15,20 @@ Read, in this order:
 If the issue conflicts with something you find in the code, say so on the issue rather than quietly
 picking one. A stale issue is a normal thing to find, and checking the premise is part of the job.
 
+## Temp files and long commands
+
+Two traps that have each cost a builder hours, twice:
+
+- **The scratchpad directory your harness gives you is not yours.** A subagent inherits the
+  orchestrator's session scratchpad path, and writing there mixes your files with the orchestrator's.
+  Put fixtures, scripts and fake home folders in your worktree's `.scratch/` (add it to
+  `.git/info/exclude`) or a `mktemp -d`.
+- **Do not feed a heredoc to an interpreter inside a long compound command.** A Bash call of the form
+  `python3 - <<'EOF' ... EOF; source lib.sh; ...` has stalled with no child process for over an hour,
+  and a heredoc call hung another builder for three hours. Write the script to a file with a file
+  tool, then run it, and put `timeout` on anything that waits (a server, a sign-in, a CLI call against a
+  registry). Commit work in progress early, so a stall costs minutes, not the branch.
+
 ## Branch and commits
 
 ```
