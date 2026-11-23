@@ -1,6 +1,6 @@
 # 0003. Custom agents are a sibling module, not a second kind of skill
 
-- **Status:** Proposed
+- **Status:** Accepted 2026-11-23 (owner decision 1 decided by the orchestrator on PR #85)
 - **Date:** 2026-11-23
 - **Issue:** #84 (spike 7.0 of epic voidprojectssoftware/protostar-cli#37). Decides the shape of protostar-cli#124
   (7.1), #125 (7.2) and #126 (7.3), and notes what protostar-cli#34 (E4) inherits.
@@ -178,9 +178,9 @@ with three callers to shape it. That extraction belongs to E4's first story, not
 
 ## Owner decisions
 
-1. **Renaming and deleting agents from the CLI.** cli#124 assumes rename and delete tombstones, but no story has
-   an `agents rename` or `agents delete` command; without one the registry endpoints exist with no caller.
-   **Recommend:** build the registry endpoints in 7.1 (tombstones need them to mean anything) and file a small
-   7.4 for the two CLI commands, mirroring `skills rename` and `skills delete`. Cost: one more story.
+1. **Renaming and deleting agents from the CLI.** cli#124 assumes rename and delete tombstones, but no story had
+   an `agents rename` or `agents delete` command. Decided by the orchestrator on 2026-11-23 (PR #85): the registry
+   rename and delete endpoints are built in 7.1 (voidprojectssoftware/protostar-cli#124), and the two CLI commands,
+   mirroring `skills rename` and `skills delete`, are filed as voidprojectssoftware/protostar-cli#127 (7.4).
 2. **Project agents and git** (the cli#78 item 2 question, already noted on cli#125). Not decided here: 7.2
    follows whatever project skills do when it is built.
