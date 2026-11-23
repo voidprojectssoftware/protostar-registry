@@ -100,7 +100,9 @@ public static class SkillEndpoints
                 "by name. `includeProjects=true` adds every project's skills; `projectId` lists only that " +
                 "project's. A global skill has no `projectId`. `removed` lists, under the same filter, the names deleted or renamed " +
                 "away that no skill has taken since: each with its project, `lastVersion`, `renamedTo` (the skill's name now; null " +
-                "for a delete) and `removedAt`. Each skill's `firstVersion` is 1, or above it for a skill that reused a removed " +
+                "for a delete), `removedAt`, and `versions`: each version the skill had under that name as `{version, contentHash}`, so a " +
+                "client can recognise a copy it has no sync record of by its content hash alone (empty for a delete from before " +
+                "these were kept). Each skill's `firstVersion` is 1, or above it for a skill that reused a removed " +
                 "skill's name: a copy synced at a lower version is a copy of the removed skill. The content hash is SHA-256 over each file's `<path>\\n<UPPERCASE hex sha256>\\n`, " +
                 "files ordered by path (ordinal), as uppercase hex, so a client can tell whether its local " +
                 "copy matches without downloading it.")
@@ -202,7 +204,8 @@ public static class SkillEndpoints
         return Results.Ok(new SkillListResponse(
             skills.Select(s => new SkillListItem(
                 s.Name, s.Description, s.Version, s.ContentHash, s.UpdatedAt, s.FileCount, s.TotalBytes, s.ProjectId, s.ProjectName, s.FirstVersion)).ToArray(),
-            removed.Select(r => new SkillRemovedItem(r.Name, r.ProjectId, r.LastVersion, r.RenamedTo, r.RemovedAt)).ToArray()));
+            removed.Select(r => new SkillRemovedItem(
+                r.Name, r.ProjectId, r.LastVersion, r.RenamedTo, r.RemovedAt, r.Versions.Select(v => new SkillRemovedVersionItem(v.Number, v.ContentHash)).ToArray())).ToArray()));
     }
 
     /// <summary>Returns one version of the caller's skill, files included.</summary>
@@ -460,8 +463,15 @@ public sealed record SkillBulkPushResponse(IReadOnlyList<SkillPushResponse> Skil
 public sealed record SkillListResponse(IReadOnlyList<SkillListItem> Skills, IReadOnlyList<SkillRemovedItem> Removed);
 
 /// <summary>One name in <see cref="SkillListResponse.Removed"/>: deleted, or renamed to <c>RenamedTo</c>.</summary>
-/// <remarks><c>ProjectId</c> is null for a global skill; <c>RenamedTo</c> is null for a delete.</remarks>
-public sealed record SkillRemovedItem(string Name, Guid? ProjectId, int LastVersion, string? RenamedTo, DateTimeOffset RemovedAt);
+/// <remarks>
+/// <c>ProjectId</c> is null for a global skill; <c>RenamedTo</c> is null for a delete. <c>Versions</c> lists each version's
+/// content hash under this name; clients from before it ignore it.
+/// </remarks>
+public sealed record SkillRemovedItem(
+    string Name, Guid? ProjectId, int LastVersion, string? RenamedTo, DateTimeOffset RemovedAt, IReadOnlyList<SkillRemovedVersionItem> Versions);
+
+/// <summary>One version in <see cref="SkillRemovedItem.Versions"/>: its number and content hash, as the list reports a skill's.</summary>
+public sealed record SkillRemovedVersionItem(int Version, string ContentHash);
 
 /// <summary>One skill in <see cref="SkillListResponse"/>, described by its current version.</summary>
 /// <remarks>

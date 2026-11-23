@@ -20,6 +20,7 @@ Feature: The registry says which features it serves
       | skill-rename             |
       | skill-delete             |
       | skill-tombstones         |
+      | skill-tombstone-hashes   |
       | sessions                 |
       | transcript-lookup        |
       | transcript-prefix-lookup |
@@ -51,6 +52,7 @@ Feature: The registry says which features it serves
       | skill-rename             |
       | skill-delete             |
       | skill-tombstones         |
+      | skill-tombstone-hashes   |
       | sessions                 |
       | transcript-lookup        |
       | transcript-prefix-lookup |

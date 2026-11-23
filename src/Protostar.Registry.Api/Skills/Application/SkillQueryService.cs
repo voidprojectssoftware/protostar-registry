@@ -64,7 +64,7 @@ public sealed class SkillQueryService
             _ => query.Where(t => t.ProjectId == null),
         };
 
-        var rows = await query.Select(t => new SkillRemoval(t.Name, t.ProjectId, t.LastVersion, t.RenamedTo, t.RemovedAt)).ToListAsync(cancellationToken);
+        var rows = await query.Select(t => new SkillRemoval(t.Name, t.ProjectId, t.LastVersion, t.RenamedTo, t.RemovedAt, t.Versions)).ToListAsync(cancellationToken);
         return rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -138,7 +138,9 @@ public sealed record SkillSummary(
 /// <param name="LastVersion">The skill's last version under this name.</param>
 /// <param name="RenamedTo">The skill's name now, when it was renamed; <c>null</c> when it was deleted.</param>
 /// <param name="RemovedAt">When the name was removed.</param>
-public sealed record SkillRemoval(string Name, Guid? ProjectId, int LastVersion, string? RenamedTo, DateTimeOffset RemovedAt);
+/// <param name="Versions">Each version's content hash under this name (<see cref="SkillTombstone.Versions"/>).</param>
+public sealed record SkillRemoval(
+    string Name, Guid? ProjectId, int LastVersion, string? RenamedTo, DateTimeOffset RemovedAt, IReadOnlyList<RemovedSkillVersion> Versions);
 
 /// <summary>One version of a skill with every file's bytes.</summary>
 /// <param name="Name">The skill's name, exactly as stored.</param>

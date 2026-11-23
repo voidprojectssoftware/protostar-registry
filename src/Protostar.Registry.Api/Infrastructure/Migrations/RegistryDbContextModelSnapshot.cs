@@ -966,6 +966,12 @@ namespace Protostar.Registry.Api.Migrations
                     b.Property<string>("RenamedTo")
                         .HasColumnType("text");
 
+                    b.Property<string>("Versions")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ProjectId");

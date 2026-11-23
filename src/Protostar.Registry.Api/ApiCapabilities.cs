@@ -47,6 +47,12 @@ internal static class ApiCapabilities
     public const string SkillTombstones = "skill-tombstones";
 
     /// <summary>
+    /// Each name in the skill list's <c>removed</c> carries <c>versions</c>: every version it had under that name, as
+    /// <c>{version, contentHash}</c>, so a client can tell a copy it has no sync record of is a copy of the removed skill.
+    /// </summary>
+    public const string SkillTombstoneHashes = "skill-tombstone-hashes";
+
+    /// <summary>
     /// Session backup: register machines (<c>/v1/machines</c>), register transcripts and append to them chunk by chunk,
     /// download them, read their parsed summaries, and list them.
     /// </summary>
@@ -129,7 +135,7 @@ internal static class ApiCapabilities
     /// <summary>Every capability this build serves, in the order <c>/v1/meta</c> lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
-        Skills, StaleSkillPush, ProjectSkills, SkillRename, SkillDelete, SkillTombstones,
+        Skills, StaleSkillPush, ProjectSkills, SkillRename, SkillDelete, SkillTombstones, SkillTombstoneHashes,
         Sessions, TranscriptLookup, TranscriptPrefixLookup, SessionSkills, RedactedRead,
         Projects,
         Memory, MemoryContent, MemoryBaseVersions,

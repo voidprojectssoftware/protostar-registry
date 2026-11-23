@@ -35,6 +35,7 @@ public sealed class CapabilitySteps
             ["skill-rename"] = UseSkillRenameAsync,
             ["skill-delete"] = UseSkillDeleteAsync,
             ["skill-tombstones"] = UseSkillTombstonesAsync,
+            ["skill-tombstone-hashes"] = UseSkillTombstoneHashesAsync,
             ["sessions"] = UseSessionsAsync,
             ["transcript-lookup"] = UseTranscriptLookupAsync,
             ["transcript-prefix-lookup"] = UseTranscriptPrefixLookupAsync,
@@ -145,6 +146,18 @@ public sealed class CapabilitySteps
         Assert.Equal(1, removed["lastVersion"]!.GetValue<int>());
         var refused = await AssertStatusAsync(user.PushSkillAsync("probe", baseVersion: 1), HttpStatusCode.Conflict);
         Assert.Equal("https://protostar.dev/problems/skill-deleted", refused["type"]!.GetValue<string>());
+    }
+
+    private static async Task UseSkillTombstoneHashesAsync(RegistryUser user)
+    {
+        var pushed = await AssertStatusAsync(user.PushSkillAsync("probe", baseVersion: 0), HttpStatusCode.Created);
+        var hash = Assert.Single((await user.GetJsonAsync("/v1/skills"))["skills"]!.AsArray())!["contentHash"]!.GetValue<string>();
+        Assert.Equal(HttpStatusCode.NoContent, (await user.Http.DeleteAsync("/v1/skills/probe")).StatusCode);
+
+        var removed = Assert.Single((await user.GetJsonAsync("/v1/skills"))["removed"]!.AsArray())!;
+        var version = Assert.Single(removed["versions"]!.AsArray())!;
+        Assert.Equal(pushed["version"]!.GetValue<int>(), version["version"]!.GetValue<int>());
+        Assert.Equal(hash, version["contentHash"]!.GetValue<string>());
     }
 
     private static async Task UseSessionsAsync(RegistryUser user)
