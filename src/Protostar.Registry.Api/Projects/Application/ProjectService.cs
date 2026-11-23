@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Protostar.Registry.Api.Agents;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Infrastructure;
 using Protostar.Registry.Api.Skills;
@@ -72,7 +73,7 @@ public sealed class ProjectService
 
     /// <summary>Deletes the projects among <paramref name="projectIds"/> that only ever stood for a folder (<see cref="Project.StandsOnlyForFolders"/>).</summary>
     /// <remarks>
-    /// The caller checks no transcript is filed under them. A project that has skills or memory is kept: they are
+    /// The caller checks no transcript is filed under them. A project that has skills, agents or memory is kept: they are
     /// keyed by it, and deleting it would either fail on the foreign key or orphan their history.
     /// </remarks>
     public async Task ForgetFolderProjectsAsync(Guid ownerId, IReadOnlyCollection<Guid> projectIds, CancellationToken cancellationToken)
@@ -82,6 +83,7 @@ public sealed class ProjectService
         var projects = await _db.Projects.Include(p => p.Keys)
             .Where(p => p.OwnerId == ownerId && projectIds.Contains(p.Id))
             .Where(p => !_db.Skills.Any(s => s.ProjectId == p.Id))
+            .Where(p => !_db.Agents.Any(a => a.ProjectId == p.Id))
             .Where(p => !_db.MemoryFiles.Any(m => m.ProjectId == p.Id))
             .ToListAsync(cancellationToken);
         _db.Projects.RemoveRange(projects.Where(p => p.StandsOnlyForFolders));
@@ -110,8 +112,8 @@ public sealed class ProjectService
     /// <summary>Links the folder of <paramref name="identity"/> to the project named by <paramref name="target"/>, an id or an exact name.</summary>
     /// <remarks>
     /// Replaces any link the folder had. The folder's transcripts move with it (<see cref="FolderLinkChanged"/>),
-    /// and so do its project skills (<see cref="FolderSkillMove"/>), in the same save as the link. If the target
-    /// already has a skill of a name the folder would bring, nothing changes and the clash is reported.
+    /// and so do its project skills and agents (<see cref="FolderMove"/>), in the same save as the link. If the target
+    /// already has a skill (or an agent) of a name the folder would bring, nothing changes and the clash is reported.
     /// </remarks>
     public async Task<ProjectLinkResult> LinkAsync(Guid ownerId, ProjectIdentity identity, string target, CancellationToken cancellationToken)
     {
@@ -126,7 +128,7 @@ public sealed class ProjectService
         var project = candidates[0];
         var now = DateTimeOffset.UtcNow;
         var match = await MatchAsync(ownerId, identity, cancellationToken);
-        IReadOnlyList<Skill> following = [];
+        var following = FolderContents.None;
         if (match.ProjectId is { } fromId && fromId != project.Id)
         {
             var from = await LoadAsync(fromId, cancellationToken);
@@ -136,7 +138,7 @@ public sealed class ProjectService
         }
 
         project.Link(identity.FolderKey, now);
-        return await MoveSkillsAndSaveAsync(ProjectLinkOutcome.Linked, ownerId, identity, following, project, cancellationToken);
+        return await MoveAndSaveAsync(ProjectLinkOutcome.Linked, ownerId, identity, following, project, cancellationToken);
     }
 
     /// <summary>Unlinks the folder of <paramref name="identity"/>: back to where it would belong on its own, or, if it already is there by a shared key, apart.</summary>
@@ -144,14 +146,14 @@ public sealed class ProjectService
     /// A linked folder loses its link. A folder that belongs to a project by a key other copies share (a fork by
     /// its upstream's root commit, ADR 0002's owner decision 1) is given a project of its own and linked to it,
     /// so its sessions stay apart. A folder that is already its own project is left alone. The folder's project
-    /// skills move with it as on a link (<see cref="FolderSkillMove"/>), so unlinking undoes what linking moved.
+    /// skills and agents move with it as on a link (<see cref="FolderMove"/>), so unlinking undoes what linking moved.
     /// </remarks>
     public async Task<ProjectLinkResult> UnlinkAsync(Guid ownerId, ProjectIdentity identity, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
         var match = await MatchAsync(ownerId, identity, cancellationToken);
         if (match.ProjectId is not { } fromId || match.RecognisedBy is not (ProjectRecognition.Link or ProjectRecognition.RootCommit or ProjectRecognition.PreviousRootCommit or ProjectRecognition.Remote))
-            return ProjectLinkResult.Ok(ProjectLinkOutcome.NothingToUnlink, await ShowAsync(ownerId, identity, cancellationToken), []);
+            return ProjectLinkResult.Ok(ProjectLinkOutcome.NothingToUnlink, await ShowAsync(ownerId, identity, cancellationToken), [], []);
 
         var from = await LoadAsync(fromId, cancellationToken);
         var following = await FollowingAsync(from, identity.FolderKey, cancellationToken);
@@ -163,7 +165,7 @@ public sealed class ProjectService
             outcome = ProjectLinkOutcome.Unlinked;
             var own = await MatchAsync(ownerId, identity, cancellationToken, ignoringLink: true);
             to = own.ProjectId is { } ownId ? await LoadAsync(ownId, cancellationToken)
-                : following.Count > 0 ? await CreateOwnProjectAsync(ownerId, identity, now, cancellationToken)
+                : following.Any ? await CreateOwnProjectAsync(ownerId, identity, now, cancellationToken)
                 : null;
         }
         else
@@ -174,37 +176,56 @@ public sealed class ProjectService
         }
 
         if (to is null || to.Id == from.Id)
-            following = [];
-        return await MoveSkillsAndSaveAsync(outcome, ownerId, identity, following, to, cancellationToken);
+            following = FolderContents.None;
+        return await MoveAndSaveAsync(outcome, ownerId, identity, following, to, cancellationToken);
     }
 
-    /// <summary>The skills of <paramref name="from"/> that go with the folder when it leaves; call before changing the folder's keys.</summary>
-    private async Task<IReadOnlyList<Skill>> FollowingAsync(Project from, string folderKey, CancellationToken cancellationToken)
+    /// <summary>The skills and agents of <paramref name="from"/> that go with the folder when it leaves; call before changing the folder's keys.</summary>
+    private async Task<FolderContents> FollowingAsync(Project from, string folderKey, CancellationToken cancellationToken)
     {
         var skills = await _db.Skills.Where(s => s.ProjectId == from.Id).ToListAsync(cancellationToken);
-        return FolderSkillMove.Following(from, skills, folderKey);
+        var agents = await _db.Agents.Where(a => a.ProjectId == from.Id).ToListAsync(cancellationToken);
+        return new FolderContents(FolderMove.Following(from, skills, folderKey), FolderMove.Following(from, agents, folderKey));
     }
 
     /// <summary>Moves <paramref name="following"/> into <paramref name="to"/> and saves it with the key changes already made, or refuses everything on a name clash.</summary>
     /// <remarks>
-    /// One <c>SaveChanges</c> is one transaction, so a link never lands with half its skills moved. A clash found
-    /// here leaves the tracked changes unsaved; one that a concurrent push creates after the check fails the
-    /// (creator, project, name) unique index, which rolls back the same way.
+    /// One <c>SaveChanges</c> is one transaction, so a link never lands with half its skills or agents moved. A clash
+    /// found here leaves the tracked changes unsaved; one that a concurrent push creates after the check fails the
+    /// (creator, project, name) unique index, which rolls back the same way. Skills and agents are checked against their
+    /// own tables: a skill and an agent may share a name.
     /// </remarks>
-    private async Task<ProjectLinkResult> MoveSkillsAndSaveAsync(
-        ProjectLinkOutcome outcome, Guid ownerId, ProjectIdentity identity, IReadOnlyList<Skill> following, Project? to, CancellationToken cancellationToken)
+    private async Task<ProjectLinkResult> MoveAndSaveAsync(
+        ProjectLinkOutcome outcome, Guid ownerId, ProjectIdentity identity, FolderContents following, Project? to, CancellationToken cancellationToken)
     {
-        if (following.Count > 0)
+        if (following.Skills.Count > 0)
         {
             var present = await _db.Skills.AsNoTracking().Where(s => s.ProjectId == to!.Id)
                 .Select(s => new { s.CreatorId, s.Name }).ToListAsync(cancellationToken);
-            var clashes = FolderSkillMove.Clashes(following, present.Select(p => (p.CreatorId, p.Name)));
+            var clashes = FolderMove.Clashes(following.Skills, present.Select(p => (p.CreatorId, p.Name)));
             if (clashes.Count > 0)
                 return ProjectLinkResult.Fail(
                     ProjectLinkFailure.SkillNameClash,
                     $"Nothing changed: '{to!.Name}' already has {(clashes.Count == 1 ? "a skill" : "skills")} named {string.Join(", ", clashes)}, " +
                     "and this folder's project skills of the same name would go there with it. Two version histories are never merged.");
-            FolderSkillMove.Move(following, to!, identity.FolderKey);
+        }
+
+        if (following.Agents.Count > 0)
+        {
+            var present = await _db.Agents.AsNoTracking().Where(a => a.ProjectId == to!.Id)
+                .Select(a => new { a.CreatorId, a.Name }).ToListAsync(cancellationToken);
+            var clashes = FolderMove.Clashes(following.Agents, present.Select(p => (p.CreatorId, p.Name)));
+            if (clashes.Count > 0)
+                return ProjectLinkResult.Fail(
+                    ProjectLinkFailure.AgentNameClash,
+                    $"Nothing changed: '{to!.Name}' already has {(clashes.Count == 1 ? "an agent" : "agents")} named {string.Join(", ", clashes)}, " +
+                    "and this folder's project agents of the same name would go there with it. Two version histories are never merged.");
+        }
+
+        if (following.Any)
+        {
+            FolderMove.Move(following.Skills, to!, identity.FolderKey);
+            FolderMove.Move(following.Agents, to!, identity.FolderKey);
         }
 
         try
@@ -213,16 +234,21 @@ public sealed class ProjectService
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
-            return ProjectLinkResult.Fail(
-                ProjectLinkFailure.SkillNameClash,
-                "Nothing changed: a skill of the same name was pushed to the destination while this folder was moving. Run it again to see which.");
+            return following.Agents.Count == 0
+                ? ProjectLinkResult.Fail(
+                    ProjectLinkFailure.SkillNameClash,
+                    "Nothing changed: a skill of the same name was pushed to the destination while this folder was moving. Run it again to see which.")
+                : ProjectLinkResult.Fail(
+                    ProjectLinkFailure.AgentNameClash,
+                    "Nothing changed: a skill or agent of the same name was pushed to the destination while this folder was moving. Run it again to see which.");
         }
 
-        var moved = following.Select(s => s.Name).Order(StringComparer.Ordinal).ToList();
-        return ProjectLinkResult.Ok(outcome, await ShowAsync(ownerId, identity, cancellationToken), moved);
+        var movedSkills = following.Skills.Select(s => s.Name).Order(StringComparer.Ordinal).ToList();
+        var movedAgents = following.Agents.Select(a => a.Name).Order(StringComparer.Ordinal).ToList();
+        return ProjectLinkResult.Ok(outcome, await ShowAsync(ownerId, identity, cancellationToken), movedSkills, movedAgents);
     }
 
-    /// <summary>Creates the project a folder would get from its first backup, for skills to go back to when there is none.</summary>
+    /// <summary>Creates the project a folder would get from its first backup, for skills and agents to go back to when there is none.</summary>
     private async Task<Project> CreateOwnProjectAsync(Guid ownerId, ProjectIdentity identity, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var project = _db.Projects.Add(Project.Create(ownerId, identity.Name, now)).Entity;
@@ -307,16 +333,30 @@ public enum ProjectLinkFailure
     /// <summary>No project, or more than one, answers to the name or id given.</summary>
     UnknownProject,
 
-    /// <summary>The destination already has a skill of a name the folder's skills would bring (<see cref="FolderSkillMove"/>).</summary>
+    /// <summary>The destination already has a skill of a name the folder's skills would bring (<see cref="FolderMove"/>).</summary>
     SkillNameClash,
+
+    /// <summary>The destination already has an agent of a name the folder's agents would bring (<see cref="FolderMove"/>).</summary>
+    AgentNameClash,
 }
 
-/// <summary>The result of a link or unlink: the outcome, where the folder belongs now and which skills moved with it, or why it failed.</summary>
-public sealed record ProjectLinkResult(ProjectLinkOutcome Outcome, ProjectView? View, IReadOnlyList<string> MovedSkills, ProjectLinkFailure? Failure, string? Error)
+/// <summary>The result of a link or unlink: the outcome, where the folder belongs now and which skills and agents moved with it, or why it failed.</summary>
+public sealed record ProjectLinkResult(
+    ProjectLinkOutcome Outcome, ProjectView? View, IReadOnlyList<string> MovedSkills, IReadOnlyList<string> MovedAgents, ProjectLinkFailure? Failure, string? Error)
 {
-    public static ProjectLinkResult Ok(ProjectLinkOutcome outcome, ProjectView view, IReadOnlyList<string> movedSkills) => new(outcome, view, movedSkills, null, null);
+    public static ProjectLinkResult Ok(ProjectLinkOutcome outcome, ProjectView view, IReadOnlyList<string> movedSkills, IReadOnlyList<string> movedAgents) =>
+        new(outcome, view, movedSkills, movedAgents, null, null);
 
-    public static ProjectLinkResult Fail(ProjectLinkFailure failure, string error) => new(default, null, [], failure, error);
+    public static ProjectLinkResult Fail(ProjectLinkFailure failure, string error) => new(default, null, [], [], failure, error);
+}
+
+/// <summary>The project skills and agents that go with a folder when it is linked or unlinked (<see cref="FolderMove.Following"/>).</summary>
+internal sealed record FolderContents(IReadOnlyList<Skill> Skills, IReadOnlyList<Agent> Agents)
+{
+    public static readonly FolderContents None = new([], []);
+
+    /// <summary>True when anything goes with the folder.</summary>
+    public bool Any => Skills.Count > 0 || Agents.Count > 0;
 }
 
 /// <summary>Which projects a folder's sessions are filed under now: the port the Sessions feature fills.</summary>

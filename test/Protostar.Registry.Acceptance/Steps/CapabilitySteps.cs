@@ -46,6 +46,7 @@ public sealed class CapabilitySteps
             ["memory-base-versions"] = UseMemoryBaseVersionsAsync,
             ["search"] = UseSearchAsync,
             ["memory-redacted-read"] = UseMemoryRedactedReadAsync,
+            ["agents"] = UseAgentsAsync,
         };
     }
 
@@ -262,6 +263,26 @@ public sealed class CapabilitySteps
         var file = Assert.Single((await user.GetJsonAsync($"/v1/memory/{projectId}/content?redacted=true"))["files"]!.AsArray())!;
         var read = Encoding.UTF8.GetString(Convert.FromBase64String(file["content"]!.GetValue<string>()));
         Assert.Equal("the token is [redacted:github-token]", read);
+    }
+
+    private static async Task UseAgentsAsync(RegistryUser user)
+    {
+        await AssertStatusAsync(user.PushAgentAsync("probe", baseVersion: 0), HttpStatusCode.Created);
+        await AssertStatusAsync(user.PushAgentAsync("probe", baseVersion: 1), HttpStatusCode.Created);
+        var stale = await AssertStatusAsync(user.PushAgentAsync("probe", baseVersion: 1), HttpStatusCode.Conflict);
+        Assert.Equal("https://protostar.dev/problems/stale-agent-version", stale["type"]!.GetValue<string>());
+
+        var folder = RegistryUser.GitFolder("/home/alice/src/demo", RegistryUser.NewCommit());
+        var inProject = await AssertStatusAsync(user.PushAgentAsync("probe", project: folder), HttpStatusCode.Created);
+        var listed = (await user.GetJsonAsync($"/v1/agents?projectId={inProject["projectId"]!.GetValue<Guid>()}"))["agents"]!.AsArray();
+        Assert.Equal("probe", Assert.Single(listed)!["name"]!.GetValue<string>());
+
+        await AssertStatusAsync(user.Http.PostAsJsonAsync("/v1/agents/probe/rename", new { newName = "renamed" }), HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.NoContent, (await user.Http.DeleteAsync("/v1/agents/renamed")).StatusCode);
+        var removed = (await user.GetJsonAsync("/v1/agents"))["removed"]!.AsArray().Select(r => r!["name"]!.GetValue<string>());
+        Assert.Equal(["probe", "renamed"], removed);
+        var refused = await AssertStatusAsync(user.PushAgentAsync("renamed", baseVersion: 2), HttpStatusCode.Conflict);
+        Assert.Equal("https://protostar.dev/problems/agent-deleted", refused["type"]!.GetValue<string>());
     }
 
     private static async Task<JsonObject> AssertStatusAsync(Task<HttpResponseMessage> request, HttpStatusCode expected)

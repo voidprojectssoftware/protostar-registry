@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
 using OpenIddict.Validation.AspNetCore;
 using Protostar.Registry.Api;
+using Protostar.Registry.Api.Agents;
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Infrastructure;
@@ -106,6 +107,9 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<SkillPushService>();
 builder.Services.AddScoped<SkillQueryService>();
 builder.Services.AddScoped<SkillChangeService>();
+builder.Services.AddScoped<AgentPushService>();
+builder.Services.AddScoped<AgentQueryService>();
+builder.Services.AddScoped<AgentChangeService>();
 
 // Sessions: transcript bookkeeping in Postgres, transcript bytes in any S3-compatible object store
 // (RustFS under Aspire, which sets ObjectStore__* for the API).
@@ -257,6 +261,7 @@ if (app.Environment.IsDevelopment())
 app.MapAuthEndpoints();
 app.MapLoginEndpoints();
 app.MapSkillEndpoints();
+app.MapAgentEndpoints();
 app.MapSessionEndpoints();
 app.MapProjectEndpoints();
 app.MapMemoryEndpoints();

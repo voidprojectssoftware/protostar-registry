@@ -1,11 +1,12 @@
+using Protostar.Registry.Api.Agents;
 using Protostar.Registry.Api.Projects;
 using Protostar.Registry.Api.Skills;
 using Xunit;
 
-namespace Protostar.Registry.Tests.Skills.Domain;
+namespace Protostar.Registry.Tests.Projects.Domain;
 
-/// <summary>Contract tests for <see cref="FolderSkillMove"/>: which project skills go with a folder when it is linked or unlinked (registry#39).</summary>
-public sealed class FolderSkillMoveTests
+/// <summary>Contract tests for <see cref="FolderMove"/>: which project skills go with a folder when it is linked or unlinked (registry#39).</summary>
+public sealed class FolderMoveTests
 {
     private const string Root = "59dc947b0dba097d8d1dca3121154d3839dc3983";
     private const string Notes = "11111111-1111-1111-1111-111111111111:/home/me/notes";
@@ -50,7 +51,7 @@ public sealed class FolderSkillMoveTests
         var own = FolderProject(Notes);
         var skills = new[] { Skill.Create(Owner, "notes", Now, own.Id), Skill.Create(Owner, "deploy", Now, own.Id) };
 
-        Assert.Equal(skills, FolderSkillMove.Following(own, skills, Notes));
+        Assert.Equal(skills, FolderMove.Following(own, skills, Notes));
     }
 
     [Fact]
@@ -59,11 +60,11 @@ public sealed class FolderSkillMoveTests
         var own = FolderProject(Notes);
         var repo = RepoProject();
         var carried = Skill.Create(Owner, "notes", Now, own.Id);
-        FolderSkillMove.Move([carried], repo, Notes);
+        FolderMove.Move([carried], repo, Notes);
         var repos = Skill.Create(Owner, "deploy", Now, repo.Id);
 
-        Assert.Equal([carried], FolderSkillMove.Following(repo, [carried, repos], Notes));
-        Assert.Empty(FolderSkillMove.Following(repo, [carried, repos], Other));
+        Assert.Equal([carried], FolderMove.Following(repo, [carried, repos], Notes));
+        Assert.Empty(FolderMove.Following(repo, [carried, repos], Other));
     }
 
     [Fact]
@@ -73,7 +74,7 @@ public sealed class FolderSkillMoveTests
         var repo = RepoProject();
         var skill = Skill.Create(Owner, "notes", Now, own.Id);
 
-        FolderSkillMove.Move([skill], repo, Notes);
+        FolderMove.Move([skill], repo, Notes);
 
         Assert.Equal(repo.Id, skill.ProjectId);
         Assert.Equal(Notes, skill.CarriedByFolderKey);
@@ -86,8 +87,8 @@ public sealed class FolderSkillMoveTests
         var repo = RepoProject();
         var skill = Skill.Create(Owner, "notes", Now, own.Id);
 
-        FolderSkillMove.Move(FolderSkillMove.Following(own, [skill], Notes), repo, Notes);
-        FolderSkillMove.Move(FolderSkillMove.Following(repo, [skill], Notes), own, Notes);
+        FolderMove.Move(FolderMove.Following(own, [skill], Notes), repo, Notes);
+        FolderMove.Move(FolderMove.Following(repo, [skill], Notes), own, Notes);
 
         Assert.Equal(own.Id, skill.ProjectId);
         Assert.Null(skill.CarriedByFolderKey);
@@ -101,12 +102,12 @@ public sealed class FolderSkillMoveTests
         apart.Link(Notes, Now);
         var skill = Skill.Create(Owner, "notes", Now, apart.Id);
 
-        FolderSkillMove.Move(FolderSkillMove.Following(apart, [skill], Notes), repo, Notes);
+        FolderMove.Move(FolderMove.Following(apart, [skill], Notes), repo, Notes);
         Assert.Equal(repo.Id, skill.ProjectId);
 
         var apartAgain = Project.Create(Owner, "widget (fork)", Now);
         apartAgain.Link(Notes, Now);
-        FolderSkillMove.Move(FolderSkillMove.Following(repo, [skill], Notes), apartAgain, Notes);
+        FolderMove.Move(FolderMove.Following(repo, [skill], Notes), apartAgain, Notes);
         Assert.Equal(apartAgain.Id, skill.ProjectId);
     }
 
@@ -116,7 +117,7 @@ public sealed class FolderSkillMoveTests
         var own = FolderProject(Notes);
         var arriving = new[] { Skill.Create(Owner, "notes", Now, own.Id), Skill.Create(Owner, "deploy", Now, own.Id) };
 
-        var clashes = FolderSkillMove.Clashes(arriving, [(Owner, "notes"), (Guid.NewGuid(), "deploy"), (Owner, "Deploy")]);
+        var clashes = FolderMove.Clashes(arriving, [(Owner, "notes"), (Guid.NewGuid(), "deploy"), (Owner, "Deploy")]);
 
         Assert.Equal(["notes"], clashes);
     }
@@ -127,5 +128,34 @@ public sealed class FolderSkillMoveTests
         var global = Skill.Create(Owner, "notes", Now);
 
         Assert.Throws<InvalidOperationException>(() => global.MoveWithFolder(Guid.NewGuid(), null));
+    }
+
+    [Fact]
+    public void Project_agents_follow_a_folder_by_the_same_rule_as_skills()
+    {
+        var own = FolderProject(Notes);
+        var repo = RepoProject();
+        var agent = Agent.Create(Owner, "reviewer", Now, own.Id);
+        var repos = Agent.Create(Owner, "linter", Now, repo.Id);
+
+        FolderMove.Move(FolderMove.Following(own, [agent], Notes), repo, Notes);
+        Assert.Equal(repo.Id, agent.ProjectId);
+        Assert.Equal(Notes, agent.CarriedByFolderKey);
+
+        Assert.Equal([agent], FolderMove.Following(repo, [agent, repos], Notes));
+        FolderMove.Move(FolderMove.Following(repo, [agent, repos], Notes), own, Notes);
+        Assert.Equal(own.Id, agent.ProjectId);
+        Assert.Null(agent.CarriedByFolderKey);
+        Assert.Equal(repo.Id, repos.ProjectId);
+    }
+
+    [Fact]
+    public void An_agent_clashes_only_with_names_the_caller_passes_for_agents()
+    {
+        var own = FolderProject(Notes);
+        var arriving = new[] { Agent.Create(Owner, "reviewer", Now, own.Id) };
+
+        Assert.Equal(["reviewer"], FolderMove.Clashes(arriving, [(Owner, "reviewer")]));
+        Assert.Empty(FolderMove.Clashes(arriving, [(Owner, "Reviewer")]));
     }
 }

@@ -11,7 +11,7 @@
   "capabilities": ["skills", "stale-skill-push", "project-skills", "skill-rename", "skill-delete", "skill-tombstones",
                    "sessions", "transcript-lookup", "transcript-prefix-lookup", "session-skills", "redacted-read",
                    "projects", "memory", "memory-content", "memory-base-versions", "search",
-                   "memory-redacted-read"]
+                   "memory-redacted-read", "agents"]
 }
 ```
 
@@ -54,6 +54,8 @@ be added or dropped unnoticed, and cannot stay listed after its feature is gone.
 | `memory-base-versions` | A pushed memory file may carry `baseVersion`, which is kept as the new version's base. Content downloads carry each file's `history` of versions and bases, and `deletedOn`, the copies that deleted it. |
 | `search` | `GET /v1/search` searches the caller's sessions and memory, with secrets redacted. |
 | `memory-redacted-read` | `GET /v1/memory/{projectId}/content` takes `redacted=true` and returns each file's content with known secrets replaced by markers such as `[redacted:github-token]`; `sha256` and `size` then describe the redacted bytes. |
+
+| `agents` | Custom agents (ADR 0003). `POST /v1/agents` pushes one agent file (one multipart file part named by its path in the agents folder) with `baseVersion` and `project` as for skills; a stale push is refused with `409` and problem type `stale-agent-version`, and a push from a copy of a removed agent with `agent-deleted` or `agent-renamed`. `GET /v1/agents` lists them (with `includeProjects`, `projectId`, `removed` and `firstVersion`); `POST /v1/agents/{name}/rename` and `DELETE /v1/agents/{name}` rename and delete. Project agents follow a folder when it is linked or unlinked, named in `movedAgents`. |
 
 ## Adding a capability
 

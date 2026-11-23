@@ -46,6 +46,29 @@ public sealed class RegistryUser
         return await Http.PostAsync("/v1/skills", form);
     }
 
+    /// <summary>The file the last <see cref="PushAgentAsync"/> sent, so a scenario can push the same bytes again.</summary>
+    public string? LastAgentFile { get; private set; }
+
+    /// <summary>Pushes a custom agent named <paramref name="name"/> whose content differs from every earlier push, as the CLI sends it.</summary>
+    /// <param name="project">The facts of the folder whose project the agent belongs to; <c>null</c> for a personal agent.</param>
+    /// <param name="path">The file's path relative to the agents folder.</param>
+    /// <param name="markdown">The whole file, instead of one generated for <paramref name="name"/>.</param>
+    public async Task<HttpResponseMessage> PushAgentAsync(
+        string name, int? baseVersion = null, JsonObject? project = null, string? path = null, string? markdown = null)
+    {
+        markdown ??= $"---\nname: {name}\ndescription: An acceptance test agent.\ntools: Read, Grep\n---\nPush {++_pushes} from {Login}, {Guid.NewGuid()}.\n";
+        LastAgentFile = markdown;
+        var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes(markdown));
+        file.Headers.ContentType = new MediaTypeHeaderValue("text/markdown");
+        form.Add(file, "file", path ?? $"{name}.md");
+        if (baseVersion is { } based)
+            form.Add(new StringContent(based.ToString()), "baseVersion");
+        if (project is not null)
+            form.Add(new StringContent(new JsonObject { ["machineId"] = await EnsureMachineAsync(), ["facts"] = project.DeepClone() }.ToJsonString()), "project");
+        return await Http.PostAsync("/v1/agents", form);
+    }
+
     /// <summary>Returns the machine this user's backups come from, registering it on first use.</summary>
     public async Task<Guid> EnsureMachineAsync()
     {
@@ -180,6 +203,15 @@ public sealed class RegistryUser
         ["topLevel"] = folder,
         ["mainWorktree"] = folder,
         ["subpath"] = "",
+    };
+
+    /// <summary>The facts of a folder outside git, as the CLI reports them: a project of its own, keyed by machine and path.</summary>
+    public static JsonObject PlainFolder(string folder) => new()
+    {
+        ["workingDirectory"] = folder,
+        ["directory"] = folder,
+        ["isGit"] = false,
+        ["shallow"] = false,
     };
 
     /// <summary>A random full commit hash, so each scenario's repository is its own.</summary>

@@ -1,5 +1,6 @@
 using Protostar.Registry.Api.Common;
 using Protostar.Registry.Api.Identity;
+using Protostar.Registry.Api.Projects;
 
 namespace Protostar.Registry.Api.Skills;
 
@@ -14,7 +15,7 @@ namespace Protostar.Registry.Api.Skills;
 /// a global skill (ADR 0002), so a global <c>deploy</c> and each project's <c>deploy</c> are separate skills
 /// with separate histories.
 /// </remarks>
-public sealed class Skill : AggregateRoot
+public sealed class Skill : AggregateRoot, IMovesWithFolder
 {
     private readonly List<SkillVersion> _versions = [];
 
@@ -43,7 +44,7 @@ public sealed class Skill : AggregateRoot
     /// <remarks>
     /// A project skill and a global skill of the same name are different skills, and a global skill never gets a
     /// project. A project skill changes project only when the folder it belongs to is linked or unlinked
-    /// (<see cref="FolderSkillMove"/>).
+    /// (<see cref="FolderMove"/>).
     /// </remarks>
     public Guid? ProjectId { get; private set; }
 

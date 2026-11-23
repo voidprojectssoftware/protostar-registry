@@ -55,6 +55,7 @@ internal sealed class RegistryDocumentTransformer : IOpenApiDocumentTransformer
         {
             new() { Name = ApiTags.Meta, Description = "Service identity and the API compatibility contract." },
             new() { Name = ApiTags.Skills, Description = "Back up skills. Each push stores a new immutable version unless the content matches the current one." },
+            new() { Name = ApiTags.Agents, Description = "Back up custom agents (one Markdown file each), versioned like skills." },
             new() { Name = ApiTags.Machines, Description = "The computers and VMs you back up from. Each registers once under an id it generates and keeps." },
             new()
             {
@@ -102,6 +103,7 @@ internal static class ApiTags
 {
     public const string Meta = "Meta";
     public const string Skills = "Skills";
+    public const string Agents = "Agents";
     public const string Machines = "Machines";
     public const string Transcripts = "Transcripts";
     public const string Projects = "Projects";

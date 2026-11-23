@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Protostar.Registry.Api.Agents;
 using Protostar.Registry.Api.Identity;
 using Protostar.Registry.Api.Memory;
 using Protostar.Registry.Api.Projects;
@@ -11,7 +12,8 @@ namespace Protostar.Registry.Api.Infrastructure;
 /// <summary>
 /// The registry database and unit of work. Holds <see cref="User"/> and the <see cref="Skill"/> aggregate
 /// (<see cref="Skill"/>, <see cref="SkillVersion"/>, <see cref="SkillFile"/>) with the <see cref="SkillTombstone"/>s of
-/// removed skill names, the sessions feature
+/// removed skill names, the <see cref="Agent"/> aggregate (<see cref="Agent"/>, <see cref="AgentVersion"/>) with its
+/// <see cref="AgentTombstone"/>s, the sessions feature
 /// (<see cref="Machine"/>, <see cref="Transcript"/>, <see cref="TranscriptChunk"/>; their bytes live in blob storage), the
 /// <see cref="Project"/> aggregate (<see cref="Project"/>, <see cref="ProjectKey"/>), the <see cref="MemoryFile"/> aggregate
 /// (<see cref="MemoryFile"/>, <see cref="MemoryFileVersion"/>, <see cref="MemoryFileCopy"/>), the search index's
@@ -33,6 +35,12 @@ public sealed class RegistryDbContext(DbContextOptions<RegistryDbContext> option
     public DbSet<SkillFile> SkillFiles => Set<SkillFile>();
 
     public DbSet<SkillTombstone> SkillTombstones => Set<SkillTombstone>();
+
+    public DbSet<Agent> Agents => Set<Agent>();
+
+    public DbSet<AgentVersion> AgentVersions => Set<AgentVersion>();
+
+    public DbSet<AgentTombstone> AgentTombstones => Set<AgentTombstone>();
 
     public DbSet<Machine> Machines => Set<Machine>();
 

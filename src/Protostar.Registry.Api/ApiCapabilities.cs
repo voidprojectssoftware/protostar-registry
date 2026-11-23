@@ -101,6 +101,14 @@ internal static class ApiCapabilities
     /// </summary>
     public const string MemoryRedactedRead = "memory-redacted-read";
 
+    /// <summary>
+    /// Custom agents (ADR 0003): push one agent file (<c>POST /v1/agents</c>) with <c>baseVersion</c> and <c>project</c> as for
+    /// skills, refused with <c>409</c> and problem type <c>stale-agent-version</c>, <c>agent-deleted</c> or <c>agent-renamed</c>;
+    /// list them with <c>removed</c> (<c>GET /v1/agents</c>); rename (<c>POST /v1/agents/{name}/rename</c>) and delete
+    /// (<c>DELETE /v1/agents/{name}</c>). Project agents follow a folder when it is linked or unlinked (<c>movedAgents</c>).
+    /// </summary>
+    public const string Agents = "agents";
+
     /// <summary>Every capability this build serves, in the order <c>/v1/meta</c> lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -110,5 +118,6 @@ internal static class ApiCapabilities
         Memory, MemoryContent, MemoryBaseVersions,
         Search,
         MemoryRedactedRead,
+        Agents,
     ];
 }
