@@ -109,6 +109,23 @@ internal static class ApiCapabilities
     /// </summary>
     public const string Agents = "agents";
 
+    /// <summary>
+    /// One version of an agent can be downloaded with its file: <c>GET /v1/agents/{name}/content</c>, with <c>projectId</c>
+    /// and <c>version</c> as for skills, and <c>redacted=true</c> for the file with known secrets replaced by markers.
+    /// </summary>
+    public const string AgentContent = "agent-content";
+
+    /// <summary>
+    /// The custom agents a transcript delegated to, with a session's subagents' included:
+    /// <c>GET /v1/transcripts/{harness}/{key}/agents</c>. Only the caller's own agents are listed (project first, then
+    /// personal); each has <c>name</c>, <c>uses</c>, <c>firstUsedAt</c>, <c>lastUsedAt</c>, <c>agentId</c>, <c>projectId</c>,
+    /// an inferred <c>version</c> (<c>versionInferred</c>), and <c>deleted</c> for an agent since deleted.
+    /// </summary>
+    public const string SessionAgents = "session-agents";
+
+    /// <summary>Search takes <c>kind=agent</c> and returns the caller's custom agents, with <c>name</c>, <c>version</c> and <c>description</c>, redacted.</summary>
+    public const string AgentSearch = "agent-search";
+
     /// <summary>Every capability this build serves, in the order <c>/v1/meta</c> lists them.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -118,6 +135,6 @@ internal static class ApiCapabilities
         Memory, MemoryContent, MemoryBaseVersions,
         Search,
         MemoryRedactedRead,
-        Agents,
+        Agents, AgentContent, SessionAgents, AgentSearch,
     ];
 }

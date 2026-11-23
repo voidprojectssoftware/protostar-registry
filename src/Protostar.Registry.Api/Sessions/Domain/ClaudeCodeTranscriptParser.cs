@@ -28,6 +28,14 @@ namespace Protostar.Registry.Api.Sessions;
 /// injected line also follows a <c>Skill</c> tool call, but no command is pending then, so a call is never counted twice.
 /// Only names and times are kept, never the arguments.
 /// </para>
+/// <para>
+/// Custom agents the session delegated to (<see cref="TranscriptFacts.Agents"/>) are the assistant's <c>tool_use</c>
+/// blocks named <c>Agent</c>, or <c>Task</c> as older versions called it, counted by <c>input.subagent_type</c>. Every
+/// type is recorded as written, built-in ones (<c>general-purpose</c>, <c>Explore</c>) and plugin ones
+/// (<c>plugin:agent</c>) included: telling a custom agent from the rest needs the owner's agents, so it happens when
+/// the list is read (<see cref="SessionAgents"/>). A call with no <c>subagent_type</c> ran the default built-in agent
+/// and is not counted. The prompt the agent was given is never kept.
+/// </para>
 /// </remarks>
 public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
 {
@@ -36,6 +44,8 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
     private const int PromptPreviewLength = 200;
 
     private const string SkillToolName = "Skill";
+    private const string AgentToolName = "Agent";
+    private const string LegacyAgentToolName = "Task";
     private const string SkillContentPrefix = "Base directory for this skill:";
     private const string CommandNameOpen = "<command-name>";
     private const string CommandNameClose = "</command-name>";
@@ -45,18 +55,19 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
         var facts = new TranscriptFacts();
         var text = new StringBuilder();
         var skills = new SkillTally();
+        var agents = new NameTally();
         while (!content.IsEmpty)
         {
             var end = content.IndexOf((byte)'\n');
             var line = end < 0 ? content : content[..end];
             content = end < 0 ? [] : content[(end + 1)..];
-            facts = Read(line, facts with { Lines = facts.Lines + 1 }, text, skills);
+            facts = Read(line, facts with { Lines = facts.Lines + 1 }, text, skills, agents);
         }
 
-        return facts with { Text = text.ToString(), Skills = skills.Uses };
+        return facts with { Text = text.ToString(), Skills = skills.Uses, Agents = agents.Uses };
     }
 
-    private static TranscriptFacts Read(ReadOnlySpan<byte> line, TranscriptFacts facts, StringBuilder text, SkillTally skills)
+    private static TranscriptFacts Read(ReadOnlySpan<byte> line, TranscriptFacts facts, StringBuilder text, SkillTally skills, NameTally agents)
     {
         if (line.TrimEnd((byte)'\r').Trim((byte)' ').IsEmpty)
             return facts;
@@ -97,7 +108,7 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
             if (type == "assistant")
             {
                 skills.Pending = null;
-                CountSkillCalls(root, timestamp, skills);
+                CountCalls(root, timestamp, skills, agents);
                 AppendReply(root, text);
                 return facts with { AssistantMessages = facts.AssistantMessages + 1 };
             }
@@ -192,8 +203,8 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
         }
     }
 
-    // Every Skill tool call in an assistant line, by its input's skill name.
-    private static void CountSkillCalls(JsonElement root, DateTimeOffset? timestamp, SkillTally skills)
+    // Every Skill tool call in an assistant line, by its input's skill name, and every Agent (or Task) call by its subagent type.
+    private static void CountCalls(JsonElement root, DateTimeOffset? timestamp, SkillTally skills, NameTally agents)
     {
         if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
             !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
@@ -201,9 +212,17 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
 
         foreach (var block in content.EnumerateArray())
         {
-            if (String(block, "type") == "tool_use" && String(block, "name") == SkillToolName &&
-                block.TryGetProperty("input", out var input))
-                skills.Count(String(input, "skill"), timestamp);
+            if (String(block, "type") != "tool_use" || !block.TryGetProperty("input", out var input))
+                continue;
+            switch (String(block, "name"))
+            {
+                case SkillToolName:
+                    skills.Count(String(input, "skill"), timestamp);
+                    break;
+                case AgentToolName or LegacyAgentToolName:
+                    agents.Count(String(input, "subagent_type"), timestamp);
+                    break;
+            }
         }
     }
 
@@ -267,30 +286,34 @@ public sealed class ClaudeCodeTranscriptParser : ITranscriptParser
     }
 }
 
-/// <summary>The skills one chunk invoked so far, and the slash command waiting to be confirmed as a skill.</summary>
-internal sealed class SkillTally
+/// <summary>The names (skills, or agents) one chunk invoked so far.</summary>
+internal class NameTally
 {
-    private readonly List<SkillUse> _uses = [];
+    private readonly List<NamedUse> _uses = [];
 
-    public IReadOnlyList<SkillUse> Uses => _uses;
+    public IReadOnlyList<NamedUse> Uses => _uses;
 
-    public (string Name, DateTimeOffset? At)? Pending { get; set; }
-
-    /// <summary>Counts one invocation of <paramref name="raw"/>, as the harness wrote it, unless it cannot be a skill name.</summary>
+    /// <summary>Counts one invocation of <paramref name="raw"/>, as the harness wrote it, unless it cannot be a name.</summary>
     /// <remarks>
     /// A leading <c>/</c> is dropped, so <c>/deploy</c> and <c>deploy</c> are one skill. A blank name, one with
-    /// whitespace, or one longer than <see cref="SkillUse.MaxNameLength"/> is not a name any harness writes, and is skipped.
+    /// whitespace, or one longer than <see cref="NamedUse.MaxNameLength"/> is not a name any harness writes, and is skipped.
     /// </remarks>
     public void Count(string? raw, DateTimeOffset? at)
     {
         var name = raw?.Trim().TrimStart('/');
-        if (string.IsNullOrEmpty(name) || name.Length > SkillUse.MaxNameLength || name.Any(char.IsWhiteSpace))
+        if (string.IsNullOrEmpty(name) || name.Length > NamedUse.MaxNameLength || name.Any(char.IsWhiteSpace))
             return;
 
-        var merged = SkillUse.Merge(_uses, [SkillUse.Once(name, at)]);
+        var merged = NamedUse.Merge(_uses, [NamedUse.Once(name, at)]);
         _uses.Clear();
         _uses.AddRange(merged);
     }
+}
+
+/// <summary>The skills one chunk invoked so far, and the slash command waiting to be confirmed as a skill.</summary>
+internal sealed class SkillTally : NameTally
+{
+    public (string Name, DateTimeOffset? At)? Pending { get; set; }
 }
 
 /// <summary>Picks the parser for a harness.</summary>

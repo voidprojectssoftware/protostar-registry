@@ -141,12 +141,13 @@ builder.Services.AddScoped<IFolderFilings, TranscriptFolderFilings>();
 builder.Services.AddScoped<IDomainEventHandler<ProjectRemoteAttached>, RefileShallowClones>();
 builder.Services.AddScoped<IDomainEventHandler<FolderLinkChanged>, RefileLinkedFolder>();
 
-// Search: an owner-scoped Postgres full-text index over redacted session and memory text, kept current by
+// Search: an owner-scoped Postgres full-text index over redacted session, memory and agent text, kept current by
 // domain event handlers as content arrives.
 builder.Services.AddScoped<SearchService>();
 builder.Services.AddScoped<SearchIndexer>();
 builder.Services.AddScoped<IDomainEventHandler<TranscriptChunkAppended>, IndexAppendedChunk>();
 builder.Services.AddScoped<IDomainEventHandler<MemoryFileChanged>, IndexChangedMemoryFile>();
+builder.Services.AddScoped<IDomainEventHandler<AgentVersionPushed>, IndexPushedAgent>();
 
 // Reprocessing: one pass that rebuilds what an older registry derived from stored content (transcript summaries below
 // TranscriptSummary.CurrentParserVersion, search entries below SearchEntry.CurrentIndexVersion), at startup and then
@@ -214,7 +215,7 @@ if (args is ["reparse-sessions" or "reindex-search", ..])
     var (transcripts, search) = await ReprocessingService.RunPassAsync(app.Services, CancellationToken.None);
     Console.WriteLine(
         $"Rebuilt {transcripts.Summaries} transcript summaries and indexed {transcripts.Chunks} transcript chunks ({transcripts.Failed} transcripts failed); " +
-        $"indexed {search.MemoryFiles} memory files; removed {search.Superseded} entries of earlier revisions.");
+        $"indexed {search.MemoryFiles} memory files and {search.Agents} agents; removed {search.Superseded} entries of earlier revisions.");
     return;
 }
 

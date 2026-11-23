@@ -10,7 +10,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Protostar.Registry.Api.Agents;
 
-/// <summary>The custom agents API: push one agent, list my agents, and rename or delete one.</summary>
+/// <summary>The custom agents API: push one agent, list my agents, download one, and rename or delete one.</summary>
 /// <remarks>
 /// Shaped like the skills API so a client reuses its code (ADR 0003): the push is <c>multipart/form-data</c> with the
 /// same <c>project</c> and <c>baseVersion</c> fields, but exactly one file part, whose filename is the file's path
@@ -65,6 +65,21 @@ public static class AgentEndpoints
                 "that no agent has taken since. The content hash is the uppercase hex SHA-256 of the file's bytes alone.")
             .Produces<AgentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapGet("/{name}/content", GetContentAsync)
+            .WithName("GetAgentContent")
+            .WithSummary("Download an agent version")
+            .WithDescription(
+                "Returns one version of the caller's agent with its file's bytes (base64 in JSON). Omit `projectId` for the " +
+                "personal agent of that name, and `version` for the current version. `path` is the file's path relative to the " +
+                "agents folder as it was pushed, with `/` separators, never absolute or containing `..`. `contentHash` is the " +
+                "uppercase hex SHA-256 of the stored file, as the list reports it. With `redacted=true` the file is read as UTF-8 " +
+                "text with known secrets replaced by markers such as `[redacted:github-token]`, `redacted` is `true`, `size` is the " +
+                "redacted size and the content may no longer hash to `contentHash`; a pull uses the default, the stored bytes. " +
+                $"404 with problem `type` `{AgentProblemTypes.UnknownAgent}` when the caller has no such agent or version.")
+            .Produces<AgentContentResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/{name}/rename", RenameAsync)
             .WithName("RenameAgent")
@@ -149,6 +164,31 @@ public static class AgentEndpoints
             agents.Select(a => new AgentListItem(
                 a.Name, a.Description, a.Path, a.Version, a.ContentHash, a.UpdatedAt, a.Size, a.ProjectId, a.ProjectName, a.FirstVersion)).ToArray(),
             removed.Select(r => new AgentRemovedItem(r.Name, r.ProjectId, r.LastVersion, r.RenamedTo, r.RemovedAt)).ToArray()));
+    }
+
+    private static async Task<IResult> GetContentAsync(
+        string name,
+        [FromQuery] int? version,
+        [FromQuery] Guid? projectId,
+        [FromQuery] bool? redacted,
+        ClaimsPrincipal user,
+        AgentQueryService queries,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCreator(user, out var creatorId))
+            return Results.Unauthorized();
+
+        var content = await queries.GetContentAsync(creatorId, projectId, name, version, redacted ?? false, cancellationToken);
+        if (content is null)
+        {
+            var agent = projectId is { } p ? $"agent '{name}' in project {p}" : $"personal agent '{name}'";
+            var what = version is { } v ? $"version {v} of {agent}" : agent;
+            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: $"You have no {what}.", type: AgentProblemTypes.UnknownAgent);
+        }
+
+        return Results.Ok(new AgentContentResponse(
+            content.Name, content.ProjectId, content.Version, content.Description, content.Path, content.ContentHash, content.PushedAt,
+            content.Redacted, content.Size, content.Content));
     }
 
     private static async Task<IResult> RenameAsync(
@@ -250,6 +290,10 @@ public static class AgentProblemTypes
 
     /// <summary>A push came from a copy of an agent renamed since it synced (409); carries <c>lastVersion</c>, <c>renamedTo</c> and <c>projectId</c>.</summary>
     public const string Renamed = "https://protostar.dev/problems/agent-renamed";
+
+    /// <summary>A download named an agent, or a version of one, the caller does not have (404).</summary>
+    /// <remarks>Tells a missing agent apart from a registry without the route, which answers a bare 404.</remarks>
+    public const string UnknownAgent = "https://protostar.dev/problems/unknown-agent";
 }
 
 /// <summary>The JSON shape returned for a pushed agent.</summary>
@@ -267,6 +311,12 @@ public sealed record AgentListItem(
 
 /// <summary>One name in <see cref="AgentListResponse.Removed"/>: deleted, or renamed to <c>RenamedTo</c>.</summary>
 public sealed record AgentRemovedItem(string Name, Guid? ProjectId, int LastVersion, string? RenamedTo, DateTimeOffset RemovedAt);
+
+/// <summary>The JSON shape returned when downloading an agent version; <c>Content</c> is base64 in JSON.</summary>
+/// <remarks><c>ProjectId</c> is null for a personal agent. See <see cref="AgentVersionContent"/> for each field.</remarks>
+public sealed record AgentContentResponse(
+    string Name, Guid? ProjectId, int Version, string Description, string Path, string ContentHash, DateTimeOffset PushedAt,
+    bool Redacted, long Size, byte[] Content);
 
 /// <summary>The JSON body of a rename.</summary>
 public sealed record AgentRenameRequest(string? NewName);

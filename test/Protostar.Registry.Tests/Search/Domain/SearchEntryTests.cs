@@ -31,6 +31,22 @@ public sealed class SearchEntryTests
         Assert.Equal(updatedAt, entry.MemoryFileUpdatedAt);
     }
 
+    [Fact]
+    public void An_agent_entry_is_redacted_and_marks_its_agent_and_version_with_no_machine()
+    {
+        var (agentId, versionId) = (Guid.NewGuid(), Guid.NewGuid());
+
+        var entry = Assert.Single(SearchEntry.ForAgent(Guid.NewGuid(), agentId, versionId, $"---\nname: deployer\n---\nUse {Token}.", Now));
+
+        Assert.DoesNotContain(Token, entry.Text);
+        Assert.Contains("[redacted:", entry.Text);
+        Assert.Equal(SearchSource.Agent, entry.Source);
+        Assert.Equal(agentId, entry.AgentId);
+        Assert.Equal(versionId, entry.AgentVersionId);
+        Assert.Null(entry.MachineId);
+        Assert.Null(entry.TranscriptId);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

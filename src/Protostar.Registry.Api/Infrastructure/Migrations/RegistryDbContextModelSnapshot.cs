@@ -562,6 +562,12 @@ namespace Protostar.Registry.Api.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AgentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AgentVersionId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("ChunkId")
                         .HasColumnType("uuid");
 
@@ -571,7 +577,7 @@ namespace Protostar.Registry.Api.Migrations
                     b.Property<DateTimeOffset>("IndexedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("MachineId")
+                    b.Property<Guid?>("MachineId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("MemoryFileId")
@@ -612,6 +618,9 @@ namespace Protostar.Registry.Api.Migrations
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchVector"), "GIN");
 
                     b.HasIndex("TranscriptId");
+
+                    b.HasIndex("AgentId", "Segment")
+                        .IsUnique();
 
                     b.HasIndex("ChunkId", "Segment")
                         .IsUnique();
@@ -734,6 +743,12 @@ namespace Protostar.Registry.Api.Migrations
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Summary", "Protostar.Registry.Api.Sessions.Transcript.Summary#TranscriptSummary", b1 =>
                         {
                             b1.IsRequired();
+
+                            b1.Property<string>("Agents")
+                                .IsRequired()
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("jsonb")
+                                .HasDefaultValueSql("'[]'::jsonb");
 
                             b1.Property<int>("AssistantMessages")
                                 .HasColumnType("integer");
@@ -1135,6 +1150,11 @@ namespace Protostar.Registry.Api.Migrations
 
             modelBuilder.Entity("Protostar.Registry.Api.Search.SearchEntry", b =>
                 {
+                    b.HasOne("Protostar.Registry.Api.Agents.Agent", null)
+                        .WithMany()
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("Protostar.Registry.Api.Sessions.TranscriptChunk", null)
                         .WithMany()
                         .HasForeignKey("ChunkId")

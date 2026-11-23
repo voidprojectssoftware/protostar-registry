@@ -8,12 +8,15 @@ public enum SearchSource
 
     /// <summary>The current version of a memory file.</summary>
     Memory,
+
+    /// <summary>The current version of a custom agent's file.</summary>
+    Agent,
 }
 
-/// <summary>One piece of redacted, searchable text from a transcript chunk or a memory file, in the owner's search index.</summary>
+/// <summary>One piece of redacted, searchable text from a transcript chunk, a memory file or a custom agent, in the owner's search index.</summary>
 /// <remarks>
 /// <para>
-/// The index is a projection: everything in it can be rebuilt from the transcripts and memory the registry keeps.
+/// The index is a projection: everything in it can be rebuilt from the transcripts, memory and agents the registry keeps.
 /// Its text is always redacted (<see cref="SecretRedactor"/>), because the factories here are the only way to make an
 /// entry and they redact before anything else, so neither the full-text vector nor a snippet cut from the text can
 /// hold a secret the redactor knows.
@@ -62,8 +65,14 @@ public sealed class SearchEntry
     /// <summary>The position of this piece among its source's entries, from 0.</summary>
     public int Segment { get; private set; }
 
-    /// <summary>The machine that sent the text: the chunk's sender, or the machine that first sent the memory version.</summary>
-    public Guid MachineId { get; private set; }
+    /// <summary>For an agent entry, the agent; <c>null</c> otherwise.</summary>
+    public Guid? AgentId { get; private set; }
+
+    /// <summary>For an agent entry, the version indexed; a later push makes the entry stale.</summary>
+    public Guid? AgentVersionId { get; private set; }
+
+    /// <summary>The machine that sent the text: the chunk's sender, or the machine that first sent the memory version; <c>null</c> for an agent, whose versions do not record a machine.</summary>
+    public Guid? MachineId { get; private set; }
 
     /// <summary>The redacted text.</summary>
     public string Text { get; private set; } = default!;
@@ -112,6 +121,26 @@ public sealed class SearchEntry
             MemoryFileUpdatedAt = fileUpdatedAt,
             Segment = i,
             MachineId = machineId,
+            Text = segment,
+            IndexVersion = CurrentIndexVersion,
+            IndexedAt = now,
+        }).ToList();
+
+    /// <summary>Entries for one custom agent's current version.</summary>
+    /// <param name="ownerId">The agent's creator.</param>
+    /// <param name="agentId">The agent.</param>
+    /// <param name="agentVersionId">The version indexed, so a later push is seen as stale.</param>
+    /// <param name="text">The version's file as text, not yet redacted.</param>
+    /// <param name="now">The time of indexing.</param>
+    public static IReadOnlyList<SearchEntry> ForAgent(Guid ownerId, Guid agentId, Guid agentVersionId, string? text, DateTimeOffset now) =>
+        Segments(text).Select((segment, i) => new SearchEntry
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = ownerId,
+            Source = SearchSource.Agent,
+            AgentId = agentId,
+            AgentVersionId = agentVersionId,
+            Segment = i,
             Text = segment,
             IndexVersion = CurrentIndexVersion,
             IndexedAt = now,

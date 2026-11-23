@@ -7,7 +7,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Protostar.Registry.Api.Search;
 
-/// <summary>The search API: find my sessions and memory by what they say.</summary>
+/// <summary>The search API: find my sessions, memory and custom agents by what they say.</summary>
 /// <remarks>Acts on the caller's own data only. The handler stays thin; <see cref="SearchService"/> does the work.</remarks>
 public static class SearchEndpoints
 {
@@ -28,6 +28,11 @@ public static class SearchEndpoints
         Each snippet marks matches between `{SearchService.MatchStart}` and `{SearchService.MatchEnd}`. No match is an
         empty array, not an error. Content backed up before search existed is indexed in the background after an
         upgrade, so it may take a moment to appear.
+
+        `kind=agent` searches your custom agents instead: each agent's current version, its whole file (front matter
+        included), redacted like everything else. An agent hit has `name`, `version` and `description` in place of a
+        session's key or a memory file's path, no machine, and `date` is when that version was pushed. Agents are only
+        searched with `kind=agent`; without `kind`, a search covers sessions and memory.
         """;
 
     public static void MapSearchEndpoints(this WebApplication app)
@@ -36,17 +41,17 @@ public static class SearchEndpoints
             .RequireAuthorization(SkillEndpoints.Policy)
             .WithTags(ApiTags.Search)
             .WithName("Search")
-            .WithSummary("Search my sessions and memory")
+            .WithSummary("Search my sessions, memory and agents")
             .WithDescription(SearchDescription)
             .Produces<SearchHit[]>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
-            .WithResponseDescription(StatusCodes.Status400BadRequest, $"`q` is missing, empty or over {SearchService.MaxQueryLength} characters, or `kind` is not `session` or `memory`.");
+            .WithResponseDescription(StatusCodes.Status400BadRequest, $"`q` is missing, empty or over {SearchService.MaxQueryLength} characters, or `kind` is not `session`, `memory` or `agent`.");
     }
 
     private static async Task<IResult> SearchAsync(
         ClaimsPrincipal user, SearchService service, CancellationToken cancellationToken,
         [Description("The words or phrase to search for, in web search syntax.")] string? q = null,
-        [Description("`session` or `memory`; both when absent.")] string? kind = null,
+        [Description("`session`, `memory` or `agent`; sessions and memory when absent.")] string? kind = null,
         [Description("Only this project: its id, or text its name contains, for example `protostar`.")] string? project = null,
         [Description("The most hits to return, 1 to 100.")] int limit = 20)
     {
@@ -58,7 +63,7 @@ public static class SearchEndpoints
         if (kind is not null)
         {
             if (!Enum.TryParse<SearchSource>(kind, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
-                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "kind must be session or memory.");
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "kind must be session, memory or agent.");
             source = parsed;
         }
 

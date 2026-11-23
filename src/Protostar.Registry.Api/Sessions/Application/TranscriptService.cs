@@ -362,7 +362,7 @@ public sealed class TranscriptService
                 .Where(t => t.OwnerId == ownerId && t.Harness == harness && t.ParentKey == key)
                 .Select(t => t.Summary.Skills)
                 .ToListAsync(cancellationToken);
-            uses = subagentUses.Aggregate(uses, SkillUse.Merge);
+            uses = subagentUses.Aggregate(uses, NamedUse.Merge);
         }
 
         var names = uses.Select(u => u.Name).Where(n => !SessionSkills.IsPluginSkill(n)).ToList();
@@ -378,6 +378,64 @@ public sealed class TranscriptService
             .ToListAsync(cancellationToken);
 
         return TranscriptResult<(Transcript, IReadOnlyList<SessionSkill>)>.Ok((transcript, SessionSkills.Match(uses, projectId, skills, tombstones)));
+    }
+
+    /// <summary>The custom agents a transcript delegated to, matched to the caller's registry agents; for a session, its subagents' too.</summary>
+    /// <remarks>
+    /// As <see cref="GetSkillsAsync"/>: a session's list adds up its own delegations and every one of its subagents',
+    /// matched in the session's project, and a subagent's list is its own. Only names that are the caller's agents (or
+    /// removed agent names) are returned (<see cref="SessionAgents"/>). Versions are inferred from the end of the
+    /// session: for a subagent, the end of the session it ran in, since that is when its agents were backed up.
+    /// </remarks>
+    public async Task<TranscriptResult<(Transcript Transcript, IReadOnlyList<SessionAgent> Agents)>> GetAgentsAsync(
+        Guid ownerId, string harnessRaw, string keyRaw, CancellationToken cancellationToken)
+    {
+        if (!HarnessId.TryCreate(harnessRaw, out var harness) || !TranscriptKey.TryCreate(keyRaw, out var key))
+            return TranscriptResult<(Transcript, IReadOnlyList<SessionAgent>)>.NotFound();
+
+        var transcript = await _db.Transcripts.AsNoTracking()
+            .FirstOrDefaultAsync(t => t.OwnerId == ownerId && t.Harness == harness && t.Key == key, cancellationToken);
+        if (transcript is null)
+            return TranscriptResult<(Transcript, IReadOnlyList<SessionAgent>)>.NotFound();
+
+        var uses = transcript.Summary.Agents;
+        var endedAt = transcript.Summary.LastActivityAt;
+        if (transcript.Kind == TranscriptKind.Session)
+        {
+            var subagents = await _db.Transcripts.AsNoTracking()
+                .Where(t => t.OwnerId == ownerId && t.Harness == harness && t.ParentKey == key)
+                .Select(t => new { t.Summary.Agents, t.Summary.LastActivityAt })
+                .ToListAsync(cancellationToken);
+            uses = subagents.Select(s => s.Agents).Aggregate(uses, NamedUse.Merge);
+            endedAt = subagents.Select(s => s.LastActivityAt).Append(endedAt).Max();
+        }
+        else if (transcript.ParentKey is { } parentKey)
+        {
+            var parentEnded = await _db.Transcripts.AsNoTracking()
+                .Where(t => t.OwnerId == ownerId && t.Harness == harness && t.Key == parentKey)
+                .Select(t => t.Summary.LastActivityAt)
+                .FirstOrDefaultAsync(cancellationToken);
+            endedAt = new[] { endedAt, parentEnded }.Max();
+        }
+
+        var names = uses.Select(u => u.Name).Where(n => !SessionAgents.IsPluginAgent(n)).ToList();
+        var projectId = transcript.ProjectId;
+        var tombstones = names.Count == 0 ? [] : await _db.AgentTombstones.AsNoTracking()
+            .Where(t => t.CreatorId == ownerId && (t.ProjectId == null || t.ProjectId == projectId) && names.Contains(t.Name))
+            .ToListAsync(cancellationToken);
+        var candidates = names.Concat(tombstones.Where(t => t.RenamedTo != null).Select(t => t.RenamedTo!)).Distinct().ToList();
+        var agents = candidates.Count == 0 ? [] : await _db.Agents.AsNoTracking()
+            .Where(a => a.CreatorId == ownerId && (a.ProjectId == null || a.ProjectId == projectId) && candidates.Contains(a.Name))
+            .ToListAsync(cancellationToken);
+        // Only when each version was pushed: a version row also holds the agent's file, which inference does not need.
+        var agentIds = agents.Select(a => a.Id).ToList();
+        var versions = agentIds.Count == 0 ? [] : await _db.AgentVersions.AsNoTracking()
+            .Where(v => agentIds.Contains(v.AgentId))
+            .Select(v => new AgentVersionStamp(v.AgentId, v.VersionNumber, v.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return TranscriptResult<(Transcript, IReadOnlyList<SessionAgent>)>.Ok(
+            (transcript, SessionAgents.Match(uses, projectId, endedAt, agents, versions, tombstones)));
     }
 
     /// <summary>Finds a transcript and the chunks of its current revision, in order, for download.</summary>
