@@ -1,3 +1,4 @@
+using Protostar.Registry.Api.Agents;
 using Protostar.Registry.Api.Projects;
 using Protostar.Registry.Api.Skills;
 using Xunit;
@@ -127,5 +128,34 @@ public sealed class FolderMoveTests
         var global = Skill.Create(Owner, "notes", Now);
 
         Assert.Throws<InvalidOperationException>(() => global.MoveWithFolder(Guid.NewGuid(), null));
+    }
+
+    [Fact]
+    public void Project_agents_follow_a_folder_by_the_same_rule_as_skills()
+    {
+        var own = FolderProject(Notes);
+        var repo = RepoProject();
+        var agent = Agent.Create(Owner, "reviewer", Now, own.Id);
+        var repos = Agent.Create(Owner, "linter", Now, repo.Id);
+
+        FolderMove.Move(FolderMove.Following(own, [agent], Notes), repo, Notes);
+        Assert.Equal(repo.Id, agent.ProjectId);
+        Assert.Equal(Notes, agent.CarriedByFolderKey);
+
+        Assert.Equal([agent], FolderMove.Following(repo, [agent, repos], Notes));
+        FolderMove.Move(FolderMove.Following(repo, [agent, repos], Notes), own, Notes);
+        Assert.Equal(own.Id, agent.ProjectId);
+        Assert.Null(agent.CarriedByFolderKey);
+        Assert.Equal(repo.Id, repos.ProjectId);
+    }
+
+    [Fact]
+    public void An_agent_clashes_only_with_names_the_caller_passes_for_agents()
+    {
+        var own = FolderProject(Notes);
+        var arriving = new[] { Agent.Create(Owner, "reviewer", Now, own.Id) };
+
+        Assert.Equal(["reviewer"], FolderMove.Clashes(arriving, [(Owner, "reviewer")]));
+        Assert.Empty(FolderMove.Clashes(arriving, [(Owner, "Reviewer")]));
     }
 }
