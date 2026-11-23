@@ -46,26 +46,38 @@ public sealed class SkillTombstone
     /// <summary>When the name was removed.</summary>
     public DateTimeOffset RemovedAt { get; private set; }
 
+    /// <summary>The content hash of each version the skill had under this name, oldest first.</summary>
+    /// <remarks>
+    /// Kept so a client can recognise a copy it has no sync record of (a restored backup, dotfiles, a lost sync history)
+    /// as a copy of the removed skill, by content alone, without uploading it (cli#128). Empty for a tombstone of a
+    /// deleted skill from before the hashes were kept: those versions are gone.
+    /// </remarks>
+    public IReadOnlyList<RemovedSkillVersion> Versions { get; private set; } = [];
+
     /// <summary>The tombstone for <paramref name="skill"/>, which is about to be deleted.</summary>
     /// <param name="skill">The skill being deleted.</param>
     /// <param name="lastVersion">Its current version number.</param>
     /// <param name="now">When it is deleted.</param>
-    public static SkillTombstone Deleted(Skill skill, int lastVersion, DateTimeOffset now) => For(skill, skill.Name, lastVersion, renamedTo: null, now);
+    /// <param name="versions">Its versions' content hashes (<see cref="Versions"/>).</param>
+    public static SkillTombstone Deleted(Skill skill, int lastVersion, DateTimeOffset now, IReadOnlyList<RemovedSkillVersion>? versions = null) =>
+        For(skill, skill.Name, lastVersion, renamedTo: null, now, versions);
 
     /// <summary>The tombstone for <paramref name="oldName"/>, which <paramref name="skill"/> has just been renamed from.</summary>
     /// <param name="skill">The skill, already carrying its new name.</param>
     /// <param name="oldName">The name it had.</param>
     /// <param name="lastVersion">Its current version number.</param>
     /// <param name="now">When it was renamed.</param>
+    /// <param name="versions">Its versions' content hashes (<see cref="Versions"/>).</param>
     /// <exception cref="ArgumentException"><paramref name="oldName"/> is the skill's name, so nothing was renamed.</exception>
-    public static SkillTombstone Renamed(Skill skill, string oldName, int lastVersion, DateTimeOffset now)
+    public static SkillTombstone Renamed(Skill skill, string oldName, int lastVersion, DateTimeOffset now, IReadOnlyList<RemovedSkillVersion>? versions = null)
     {
         if (oldName == skill.Name)
             throw new ArgumentException("A rename tombstone is for the name the skill no longer has.", nameof(oldName));
-        return For(skill, oldName, lastVersion, skill.Name, now);
+        return For(skill, oldName, lastVersion, skill.Name, now, versions);
     }
 
-    private static SkillTombstone For(Skill skill, string name, int lastVersion, string? renamedTo, DateTimeOffset now) => new()
+    private static SkillTombstone For(
+        Skill skill, string name, int lastVersion, string? renamedTo, DateTimeOffset now, IReadOnlyList<RemovedSkillVersion>? versions) => new()
     {
         Id = Guid.NewGuid(),
         CreatorId = skill.CreatorId,
@@ -74,6 +86,7 @@ public sealed class SkillTombstone
         LastVersion = lastVersion,
         RenamedTo = renamedTo,
         RemovedAt = now,
+        Versions = (versions ?? []).Where(v => v.Number <= lastVersion).OrderBy(v => v.Number).ToList(),
     };
 
     /// <summary>True when a push of this name based on <paramref name="baseVersion"/> came from a copy of the removed skill.</summary>
@@ -86,3 +99,8 @@ public sealed class SkillTombstone
     /// <summary>The skill this name was renamed to has been deleted, so the name now reads as deleted.</summary>
     public void TargetDeleted() => RenamedTo = null;
 }
+
+/// <summary>One version of a removed skill, as its <see cref="SkillTombstone"/> remembers it.</summary>
+/// <param name="Number">The version number.</param>
+/// <param name="ContentHash">That version's content hash (<see cref="Sha256Hash.OfFiles"/>), uppercase hex.</param>
+public sealed record RemovedSkillVersion(int Number, string ContentHash);

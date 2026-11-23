@@ -53,6 +53,26 @@ public sealed class SkillTombstoneTests
         Assert.Throws<ArgumentException>(() => SkillTombstone.Renamed(skill, "greet-user", 1, Now));
     }
 
+    [Fact]
+    public void Remembers_the_content_hash_of_each_version_up_to_the_last_oldest_first()
+    {
+        var skill = SkillAt(2, "greet-user");
+        skill.Rename(skill.CreatorId, "hello", ["greet-user"]);
+
+        var tombstone = SkillTombstone.Renamed(skill, "greet-user", 2, Now,
+            [new RemovedSkillVersion(3, "C"), new RemovedSkillVersion(2, "B"), new RemovedSkillVersion(1, "A")]);
+
+        Assert.Equal([new RemovedSkillVersion(1, "A"), new RemovedSkillVersion(2, "B")], tombstone.Versions);
+    }
+
+    [Fact]
+    public void A_tombstone_given_no_versions_remembers_no_hashes()
+    {
+        var tombstone = SkillTombstone.Deleted(SkillAt(3), 3, Now);
+
+        Assert.Empty(tombstone.Versions);
+    }
+
     // ----- Refuses -----
 
     [Theory]
