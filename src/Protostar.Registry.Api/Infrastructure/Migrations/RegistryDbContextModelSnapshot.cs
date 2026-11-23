@@ -232,6 +232,136 @@ namespace Protostar.Registry.Api.Migrations
                     b.ToTable("OpenIddictTokens", (string)null);
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Agents.Agent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CarriedByFolderKey")
+                        .HasMaxLength(2100)
+                        .HasColumnType("character varying(2100)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CurrentVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CurrentVersionId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("CreatorId", "ProjectId", "Name")
+                        .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("CreatorId", "ProjectId", "Name"), false);
+
+                    b.ToTable("Agents");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Agents.AgentTombstone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CreatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("LastVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("RemovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RenamedTo")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("CreatorId", "ProjectId", "Name")
+                        .IsUnique();
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("CreatorId", "ProjectId", "Name"), false);
+
+                    b.ToTable("AgentTombstones");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Agents.AgentVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AgentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Model")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("PushedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ToolsJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PushedById");
+
+                    b.HasIndex("AgentId", "VersionNumber")
+                        .IsUnique();
+
+                    b.ToTable("AgentVersions");
+                });
+
             modelBuilder.Entity("Protostar.Registry.Api.Identity.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -904,6 +1034,60 @@ namespace Protostar.Registry.Api.Migrations
                     b.Navigation("Authorization");
                 });
 
+            modelBuilder.Entity("Protostar.Registry.Api.Agents.Agent", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Identity.User", "Creator")
+                        .WithMany()
+                        .HasForeignKey("CreatorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Agents.AgentVersion", "CurrentVersion")
+                        .WithMany()
+                        .HasForeignKey("CurrentVersionId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("Protostar.Registry.Api.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Creator");
+
+                    b.Navigation("CurrentVersion");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Agents.AgentTombstone", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Agents.AgentVersion", b =>
+                {
+                    b.HasOne("Protostar.Registry.Api.Agents.Agent", null)
+                        .WithMany("Versions")
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Protostar.Registry.Api.Identity.User", "PushedBy")
+                        .WithMany()
+                        .HasForeignKey("PushedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("PushedBy");
+                });
+
             modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFile", b =>
                 {
                     b.HasOne("Protostar.Registry.Api.Projects.Project", null)
@@ -1084,6 +1268,11 @@ namespace Protostar.Registry.Api.Migrations
             modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
                 {
                     b.Navigation("Tokens");
+                });
+
+            modelBuilder.Entity("Protostar.Registry.Api.Agents.Agent", b =>
+                {
+                    b.Navigation("Versions");
                 });
 
             modelBuilder.Entity("Protostar.Registry.Api.Memory.MemoryFile", b =>

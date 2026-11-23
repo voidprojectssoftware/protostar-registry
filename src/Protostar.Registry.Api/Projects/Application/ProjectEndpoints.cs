@@ -26,7 +26,7 @@ public static class ProjectEndpoints
         projects.MapPost("/link", LinkAsync)
             .WithName("LinkFolder")
             .WithSummary("Link a folder to a project")
-            .WithDescription("Links the folder on this machine to a project, by id or exact name. Its sessions move with it, and it resolves to that project until unlinked. Its project skills move too: all of them when the folder had a project of its own, otherwise only those an earlier link or unlink of this folder carried in. 409 when the target already has a skill of the same name; then nothing changes.")
+            .WithDescription("Links the folder on this machine to a project, by id or exact name. Its sessions move with it, and it resolves to that project until unlinked. Its project skills and agents move too: all of them when the folder had a project of its own, otherwise only those an earlier link or unlink of this folder carried in. 409 when the target already has a skill (or an agent) of the same name; then nothing changes. `movedSkills` and `movedAgents` name what moved.")
             .Produces<ProjectLinkResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -34,7 +34,7 @@ public static class ProjectEndpoints
         projects.MapPost("/unlink", UnlinkAsync)
             .WithName("UnlinkFolder")
             .WithSummary("Unlink a folder")
-            .WithDescription("Removes the folder's link, so it belongs where it would on its own. A folder that shares a project by a common root commit (a fork) and has no link is given a project of its own instead. Project skills move as on a link, so an unlink undoes what the link moved; 409 on a name clash, and then nothing changes.")
+            .WithDescription("Removes the folder's link, so it belongs where it would on its own. A folder that shares a project by a common root commit (a fork) and has no link is given a project of its own instead. Project skills and agents move as on a link, so an unlink undoes what the link moved; 409 on a name clash, and then nothing changes.")
             .Produces<ProjectLinkResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status409Conflict);
@@ -78,7 +78,7 @@ public static class ProjectEndpoints
     private static IResult ToResult(ProjectLinkResult result) => result.Failure switch
     {
         null => Results.Ok(ProjectLinkResponse.From(result)),
-        ProjectLinkFailure.SkillNameClash => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: result.Error),
+        ProjectLinkFailure.SkillNameClash or ProjectLinkFailure.AgentNameClash => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: result.Error),
         _ => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: result.Error),
     };
 
@@ -114,7 +114,8 @@ public sealed record ProjectViewResponse(
 /// <param name="Outcome">`linked`, `unlinked`, `separated` or `nothingToUnlink`.</param>
 /// <param name="Project">Where the folder belongs now.</param>
 /// <param name="MovedSkills">The names of the project skills that moved with the folder, sorted; empty when none did.</param>
-public sealed record ProjectLinkResponse(ProjectLinkOutcome Outcome, ProjectViewResponse Project, IReadOnlyList<string> MovedSkills)
+/// <param name="MovedAgents">The names of the project agents that moved with the folder, sorted; empty when none did.</param>
+public sealed record ProjectLinkResponse(ProjectLinkOutcome Outcome, ProjectViewResponse Project, IReadOnlyList<string> MovedSkills, IReadOnlyList<string> MovedAgents)
 {
-    internal static ProjectLinkResponse From(ProjectLinkResult r) => new(r.Outcome, ProjectViewResponse.From(r.View!), r.MovedSkills);
+    internal static ProjectLinkResponse From(ProjectLinkResult r) => new(r.Outcome, ProjectViewResponse.From(r.View!), r.MovedSkills, r.MovedAgents);
 }
